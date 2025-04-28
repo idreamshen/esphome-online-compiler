@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       yaml_config:
-        description: 'ESPHome YAML 配置'
+        description: 'ESPHome YAML 配置 (Base64编码)'
         required: true
         type: string
 
@@ -53,9 +53,15 @@ jobs:
               yaml = yamlMatch[1];
               issue_number = context.payload.issue.number;
             } else if (context.eventName === 'workflow_dispatch') {
-              // 从手动触发的输入获取配置
-              yaml = context.payload.inputs.yaml_config;
-              console.log('Received YAML config from manual trigger:', yaml);
+              // 从手动触发的输入获取配置，假设是Base64编码的
+              try {
+                const base64Config = context.payload.inputs.yaml_config;
+                yaml = Buffer.from(base64Config, 'base64').toString('utf-8');
+                console.log('Decoded YAML config from manual trigger');
+              } catch (error) {
+                core.setFailed(`Failed to decode Base64 YAML: ${error.message}`);
+                return;
+              }
             }
 
             if (!yaml) {
