@@ -54,10 +54,17 @@ jobs:
               issue_number = context.payload.issue.number;
             } else if (context.eventName === 'workflow_dispatch') {
               // 从手动触发的输入获取配置
-              yaml = core.getInput('yaml_config');
+              yaml = context.payload.inputs.yaml_config;
+              console.log('Received YAML config from manual trigger:', yaml);
+            }
+
+            if (!yaml) {
+              core.setFailed('No YAML configuration provided');
+              return;
             }
 
             require('fs').writeFileSync('config.yaml', yaml);
+            console.log('Written config.yaml with content length:', yaml.length);
             if (issue_number) {
               core.setOutput('issue_number', issue_number);
             }
