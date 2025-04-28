@@ -3,6 +3,12 @@ name: ESPHome Issue Compile
 on:
   issues:
     types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      yaml_config:
+        description: 'ESPHome YAML 配置'
+        required: true
+        type: string
 
 jobs:
   compile:
@@ -20,29 +26,41 @@ jobs:
         run: |
           pip install esphome
 
-      - name: Get latest issue content
-        id: issue
-        if: github.event_name == 'issues'
+      - name: Get configuration content
+        id: config
         uses: actions/github-script@v6
         with:
           script: |
-            const issue = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number
-            });
-            const content = issue.data.body;
+            let yaml = '';
+            let issue_number = null;
+            
+            if (context.eventName === 'issues') {
+              // 从 issue 获取配置
+              const issue = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number
+              });
+              const content = issue.data.body;
 
-            // 提取 YAML 内容 (假设 YAML 内容在 ```yaml 和 ``` 之间)
-            const yamlMatch = content.match(/```yaml\s*([\s\S]*?)\s*```/);
-            if (!yamlMatch) {
-              core.setFailed('No YAML configuration found in issue body');
-              return;
+              // 提取 YAML 内容 (假设 YAML 内容在 ```yaml 和 ``` 之间)
+              const yamlMatch = content.match(/```yaml\s*([\s\S]*?)\s*```/);
+              if (!yamlMatch) {
+                core.setFailed('No YAML configuration found in issue body');
+                return;
+              }
+
+              yaml = yamlMatch[1];
+              issue_number = context.payload.issue.number;
+            } else if (context.eventName === 'workflow_dispatch') {
+              // 从手动触发的输入获取配置
+              yaml = core.getInput('yaml_config');
             }
 
-            const yaml = yamlMatch[1];
             require('fs').writeFileSync('config.yaml', yaml);
-            core.setOutput('issue_number', context.payload.issue.number);
+            if (issue_number) {
+              core.setOutput('issue_number', issue_number);
+            }
 
       - name: Validate and compile ESPHome configuration
         id: compile
@@ -71,6 +89,6 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.issue.outputs.issue_number }},
+              issue_number: ${{ steps.config.outputs.issue_number }},
               body: comment
             });
