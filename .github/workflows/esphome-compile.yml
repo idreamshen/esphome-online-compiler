@@ -1,0 +1,93 @@
+name: ESPHome Compile
+
+on:
+  workflow_dispatch:
+    inputs:
+      encoded_yaml:
+        description: Base64 编码的 ESPHome YAML 配置
+        required: true
+        type: string
+      request_id:
+        description: 用于标识此次编译请求的唯一 ID
+        required: true
+        type: string
+      device_name:
+        description: 设备名称，仅用于日志展示
+        required: false
+        type: string
+      board:
+        description: 目标板类型，仅用于日志展示
+        required: false
+        type: string
+
+run-name: >-
+  ESPHome compile (${{ inputs.device_name || inputs.board || 'request' }}) • ${{ inputs.request_id }}
+
+jobs:
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      REQUEST_ID: ${{ inputs.request_id }}
+      DEVICE_NAME: ${{ inputs.device_name }}
+      BOARD_NAME: ${{ inputs.board }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode configuration
+        id: decode
+        shell: bash
+        env:
+          ENCODED_YAML: ${{ inputs.encoded_yaml }}
+        run: |
+          set -eo pipefail
+          if [[ -z "$ENCODED_YAML" ]]; then
+            echo "Empty encoded YAML input" >&2
+            exit 1
+          fi
+
+          echo "$ENCODED_YAML" | base64 --decode > config.yaml
+          echo "YAML length: $(wc -c < config.yaml)"
+          echo "config-path=config.yaml" >> "$GITHUB_OUTPUT"
+
+      - name: Install ESPHome
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install esphome
+
+      - name: Compile firmware
+        id: compile
+        run: |
+          set -eo pipefail
+          esphome version
+          esphome compile "${{ steps.decode.outputs.config-path }}"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ env.REQUEST_ID }}
+          path: |
+            .esphome/build
+            config.yaml
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publish summary
+        if: always()
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ### ESPHome 编译结果
+
+          - 请求 ID：${{ env.REQUEST_ID }}
+          - 设备：${{ env.DEVICE_NAME || '未设置' }}
+          - 板子：${{ env.BOARD_NAME || '未设置' }}
+          - 构建目录：`.esphome/build`
+
+          下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`。
+          EOF

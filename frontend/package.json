@@ -1,0 +1,26 @@
+{
+  "name": "esphome-online-compiler-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .ts,.tsx,.vue"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "js-base64": "^3.7.5",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.3",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.21.1",
+    "sass": "^1.70.0",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.4"
+  }
+}
