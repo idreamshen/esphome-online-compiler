@@ -55,7 +55,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   try {
     if (request.method === 'GET' && path === '/auth/login') {
-      return buildCorsResponse(request, env, await handleLogin(env));
+      return buildCorsResponse(request, env, await handleLogin(request, env));
     }
 
     if (request.method === 'GET' && path === '/auth/callback') {
@@ -63,7 +63,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if ((request.method === 'POST' || request.method === 'GET') && path === '/auth/logout') {
-      return buildCorsResponse(request, env, await handleLogout(env));
+      return buildCorsResponse(request, env, await handleLogout(request, env));
     }
 
     if (request.method === 'GET' && path === '/api/session') {
@@ -115,7 +115,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 };
 
-async function handleLogin(env: Env): Promise<Response> {
+async function handleLogin(request: Request, env: Env): Promise<Response> {
   const state = crypto.randomUUID();
   const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
   const scopes = getRequiredScopes(env);
@@ -127,11 +127,12 @@ async function handleLogin(env: Env): Promise<Response> {
 
   const headers = new Headers();
   headers.set('Location', authorizeUrl.toString());
+  const secure = isSecureRequest(request);
   headers.append(
     'Set-Cookie',
     serializeCookie(STATE_COOKIE, state, {
       httpOnly: true,
-      secure: true,
+      secure,
       sameSite: 'Lax',
       maxAge: STATE_MAX_AGE
     })
@@ -181,13 +182,14 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ message: 'OAuth token missing in response' }, 502);
   }
 
+  const secure = isSecureRequest(request);
   const sessionValue = await createSessionValue(accessToken, env.SESSION_SECRET);
   const headers = new Headers();
   headers.append(
     'Set-Cookie',
     serializeCookie(SESSION_COOKIE, sessionValue, {
       httpOnly: true,
-      secure: true,
+      secure,
       sameSite: 'Lax',
       maxAge: SESSION_MAX_AGE
     })
@@ -196,7 +198,7 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
     'Set-Cookie',
     serializeCookie(STATE_COOKIE, '', {
       httpOnly: true,
-      secure: true,
+      secure,
       sameSite: 'Lax',
       maxAge: 0
     })
@@ -207,13 +209,14 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 302, headers });
 }
 
-async function handleLogout(env: Env): Promise<Response> {
+async function handleLogout(request: Request, env: Env): Promise<Response> {
   const headers = new Headers();
+  const secure = isSecureRequest(request);
   headers.append(
     'Set-Cookie',
     serializeCookie(SESSION_COOKIE, '', {
       httpOnly: true,
-      secure: true,
+      secure,
       sameSite: 'Lax',
       maxAge: 0
     })
@@ -658,4 +661,13 @@ function getRequiredScopes(env: Env): string[] {
     typeof env.GITHUB_REQUIRE_PRIVATE_REPO === 'string' &&
     env.GITHUB_REQUIRE_PRIVATE_REPO.toLowerCase() === 'true';
   return requirePrivate ? ['repo', 'workflow'] : ['public_repo', 'workflow'];
+}
+
+function isSecureRequest(request: Request): boolean {
+  const url = new URL(request.url);
+  if (url.protocol === 'https:') {
+    return true;
+  }
+  const forwardedProto = request.headers.get('X-Forwarded-Proto');
+  return forwardedProto?.toLowerCase() === 'https';
 }
