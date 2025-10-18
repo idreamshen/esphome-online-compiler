@@ -1,94 +1,95 @@
-# ESPHome 在线编译平台
-在浏览器中粘贴 ESPHome YAML 即可完成云端编译并下载固件
+# ESPHome Online Compiler
 
-## 功能亮点
+Paste your ESPHome YAML in the browser to compile in the cloud and download firmware.
 
-- ✅ 自动识别并按出现顺序收集 `!secret`，支持填写后缓存本地，下次继续编译无需重复输入。
-- ✅ 生成 16 位字母数字压缩包密码，可自定义并在本地持久化；上传的固件 Artifact 为加密压缩包，命名格式 `firmware-<request_id>-password.zip`。
-- ✅ YAML 草稿、压缩包密码、ESPHome 版本选择及最近编译状态都会自动保存，刷新页面即可恢复。
-- ✅ 支持在表单中选择常用 ESPHome 版本或手动输入具体版本号进行历史版本编译。
-- ✅ 失败时保留 GitHub Workflow 链接，一键跳转查看完整日志。
+## Features
 
-## 目录结构
+- ✅ Automatically detects and collects `!secret` placeholders in order of appearance, with local caching to avoid re-entering values on subsequent compilations.
+- ✅ Generates a 16-character alphanumeric archive password, customizable and locally persisted; firmware artifacts are encrypted zip files named `firmware-<request_id>-password.zip`.
+- ✅ Automatically saves YAML drafts, archive passwords, ESPHome version selection, and recent compilation status; recovers on page refresh.
+- ✅ Supports selecting common ESPHome versions from a dropdown or manually entering a specific version number for historical builds.
+- ✅ Retains GitHub Workflow link on failure for one-click access to full logs.
 
-- `frontend/`：Vite + Vue 3 单页应用，负责 OAuth 登录、YAML 输入、状态轮询与固件下载
-- `functions/`：Cloudflare Pages Functions（`[[path]].ts`）实现 OAuth 流程、会话管理以及对 GitHub Actions API 的代理
-- `.github/workflows/esphome-compile.yml`：实际执行编译的 GitHub Actions Workflow
-- `.dev.vars.example`：本地开发时可复制为 `.dev.vars`，内含所需环境变量示例
+## Project Structure
 
-## 准备 GitHub OAuth App
+- `frontend/`: Vite + Vue 3 SPA handling OAuth login, YAML input, status polling, and firmware downloads
+- `functions/`: Cloudflare Pages Functions (`[[path]].ts`) implementing OAuth flow, session management, and GitHub Actions API proxy
+- `.github/workflows/esphome-compile.yml`: GitHub Actions Workflow that performs the actual compilation
+- `.dev.vars.example`: Example environment variables for local development; copy to `.dev.vars`
 
-1. 访问 [GitHub Settings → Developer settings → OAuth Apps](https://github.com/settings/developers) 创建新的 OAuth App。
-2. Homepage / Callback URL 建议设置为将来 Cloudflare Pages 的域名，例如：
-   - Homepage：`https://your-project.pages.dev/`
-   - Authorization callback URL：`https://your-project.pages.dev/auth/callback`
-3. 记录 `Client ID`，并点击 “Generate a new client secret” 保存 `Client Secret`。
-4. Pages Functions 会请求 `workflow` 与 `public_repo`（或 `repo`）权限，以便触发公开/私有仓库的 `workflow_dispatch`。
+## GitHub OAuth App Setup
 
-## Cloudflare Pages 配置
+1. Visit [GitHub Settings → Developer settings → OAuth Apps](https://github.com/settings/developers) to create a new OAuth App.
+2. Set Homepage / Callback URL to your future Cloudflare Pages domain, for example:
+   - Homepage: `https://your-project.pages.dev/`
+   - Authorization callback URL: `https://your-project.pages.dev/auth/callback`
+3. Note the `Client ID` and click "Generate a new client secret" to save the `Client Secret`.
+4. Pages Functions will request `workflow` and `public_repo` (or `repo`) permissions to trigger `workflow_dispatch` on public/private repositories.
 
-1. 在 Cloudflare 控制台创建 Pages 项目（连接 Git 仓库或手动上传）。
-2. 构建设置示例：
-   - Build Command：`npm install && npm run build --prefix frontend`
-   - Build Output Directory：`frontend/dist`
-   - Functions Directory：`functions`
-3. 在 **Pages → Settings → Variables (Production & Preview)** 中添加：
+## Cloudflare Pages Configuration
+
+1. Create a Pages project in the Cloudflare dashboard (connect a Git repository or upload manually).
+2. Build settings example:
+   - Build Command: `npm install && npm run build --prefix frontend`
+   - Build Output Directory: `frontend/dist`
+   - Functions Directory: `functions`
+3. Add environment variables in **Pages → Settings → Variables (Production & Preview)**:
    - `GITHUB_CLIENT_ID`
    - `GITHUB_CLIENT_SECRET`
-   - `SESSION_SECRET`（随机 32+ 字节字符串，例如 `openssl rand -base64 32`）
-   - `GITHUB_OAUTH_REDIRECT_URI`（与 OAuth App callback 保持一致；生产填 Pages 域名的 `/auth/callback`，开发时可用 `http://localhost:5173/auth/callback`，确保域名一致）
+   - `SESSION_SECRET` (random 32+ byte string, e.g., `openssl rand -base64 32`)
+   - `GITHUB_OAUTH_REDIRECT_URI` (must match OAuth App callback; production uses Pages domain `/auth/callback`, development can use `http://localhost:5173/auth/callback`)
    - `GITHUB_REPO_OWNER`
    - `GITHUB_REPO_NAME`
-   - `GITHUB_WORKFLOW_ID`（如 `esphome-compile.yml`）
-   - `GITHUB_WORKFLOW_REF`（默认 `main`）
-   - `FRONTEND_URL`（授权结束后的跳转地址，生产时建议写 Pages 域名）
-   - `ALLOWED_ORIGINS`（逗号分隔的允许跨域来源；至少包含 Pages 域名，开发时可加 `http://localhost:5173`）
-   - `GITHUB_REQUIRE_PRIVATE_REPO`（默认留空/false，仅在需要访问私有仓库时设为 `true` 以请求 `repo` scope）
-   - `GITHUB_SERVICE_TOKEN`（可选，平台默认使用的 Fine-grained PAT，建议仅勾选 `workflow` 与 `public_repo` 权限）
+   - `GITHUB_WORKFLOW_ID` (e.g., `esphome-compile.yml`)
+   - `GITHUB_WORKFLOW_REF` (default `main`)
+   - `FRONTEND_URL` (redirect URL after authorization; recommend Pages domain for production)
+   - `ALLOWED_ORIGINS` (comma-separated list of allowed CORS origins; must include Pages domain, add `http://localhost:5173` for development)
+   - `GITHUB_REQUIRE_PRIVATE_REPO` (default empty/false; set to `true` only when accessing private repos to request `repo` scope)
+   - `GITHUB_SERVICE_TOKEN` (optional; platform default Fine-grained PAT; recommend selecting only `workflow` and `public_repo` permissions)
 
-> 注：Cloudflare Pages 会为 Production 和 Preview 分别保存变量，可使用不同的 OAuth App 区分环境。
+> Note: Cloudflare Pages stores variables separately for Production and Preview; you can use different OAuth Apps to distinguish environments.
 
-## 本地开发
+## Local Development
 
-1. 安装并运行前端：
+1. Install and run frontend:
    ```bash
    cd frontend
    npm install
    npm run dev
    ```
-2. 在仓库根目录复制 `.dev.vars.example` 为 `.dev.vars`，填入 Dev OAuth App 的配置。
-3. 启动 Pages Functions 本地环境（需要安装 `wrangler`）：
+2. Copy `.dev.vars.example` to `.dev.vars` in the repository root and fill in your Dev OAuth App configuration.
+3. Start Pages Functions local environment (requires `wrangler` installation):
    ```bash
-   # 在仓库根目录
+   # In repository root
    wrangler pages dev frontend/dist --local --port 8787
    ```
-   如果 `frontend/dist` 尚未存在，可先执行一次 `npm run build --prefix frontend`。
-4. 浏览器访问 `http://localhost:5173`；Vite 会通过代理把 `/auth/*`、`/api/*` 请求转发到 `http://127.0.0.1:8787`。
+   If `frontend/dist` doesn't exist yet, run `npm run build --prefix frontend` first.
+4. Visit `http://localhost:5173` in your browser; Vite will proxy `/auth/*` and `/api/*` requests to `http://127.0.0.1:8787`.
 
-## 使用步骤
+## Usage
 
-1. （可选）点击 “GitHub 登录” 跳转授权页，授予 `workflow` + `public_repo`（或 `repo`）权限；未登录时平台会使用 `GITHUB_SERVICE_TOKEN` 触发 Workflow。
-2. 回到页面后粘贴 ESPHome YAML。
-3. 如 YAML 中包含 `!secret`，系统会自动检测并生成输入框，支持自动补全 `"` 包裹的值与本地缓存；可在提交前确认字段。
-4. 若无自定义压缩包密码，界面会生成 16 位字母数字组合并展示，后续解压 Artifact 时需使用该密码。
-5. 提交后，前端将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`（默认优先使用平台 Token，若失败会回退到已登录用户的 Token）。
-6. 前端轮询 Workflow 状态，完成后显示固件下载按钮，直接下载加密包 `firmware-<request_id>-password.zip`。
-7. 需要切换账号时可点击 “退出登录” 清除会话。
+1. (Optional) Click "GitHub Login" to authorize, granting `workflow` + `public_repo` (or `repo`) permissions; when not logged in, the platform uses `GITHUB_SERVICE_TOKEN` to trigger Workflows.
+2. Return to the page and paste your ESPHome YAML.
+3. If YAML contains `!secret`, the system auto-detects and generates input fields with auto-completion for quoted values and local caching; confirm fields before submission.
+4. If no custom archive password is set, the interface generates a 16-character alphanumeric password displayed for later use when extracting the artifact.
+5. After submission, the frontend Base64-encodes the YAML and triggers `workflow_dispatch` via Pages Functions (defaults to platform token; falls back to logged-in user token on failure).
+6. Frontend polls Workflow status; upon completion, displays firmware download button to directly download the encrypted `firmware-<request_id>-password.zip`.
+7. Click "Logout" to clear session when switching accounts.
 
-> 页面刷新不会丢失 YAML 草稿与正在进行的编译，请求会自动恢复并继续轮询状态。
+> Page refresh doesn't lose YAML drafts or ongoing compilations; requests automatically recover and continue polling status.
 
 ## GitHub Actions Workflow
 
-- 解码 YAML 到 `config.yaml`。
-- 根据前端传入的版本号安装对应的 ESPHome（默认为最新稳定版）并执行 `esphome compile config.yaml`。
-- 将所有生成的固件 `*.bin`（以及 manifest）与 `config.yaml` 加密打包为 `firmware-<request_id>-password.zip`，上传到 `artifact/` 目录；Artifact 保留 1 天。
-- 运行名称包含 `request_id`，Pages Functions 据此匹配 Workflow Run。
+- Decodes YAML to `config.yaml`.
+- Installs ESPHome based on the version number passed from frontend (defaults to latest stable) and runs `esphome compile config.yaml`.
+- Encrypts and packages all generated firmware `*.bin` (and manifest) with `config.yaml` into `firmware-<request_id>-password.zip`, uploaded to `artifact/` directory; artifacts retained for 1 day.
+- Run name includes `request_id`; Pages Functions matches Workflow Run accordingly.
 
-## 安全注意事项
+## Security Notes
 
-- OAuth Access Token 以签名后的 HttpOnly Cookie 存储，仅 Pages Functions 可访问；部署到生产时会自动启用 `Secure`。
-- 切勿将真实密钥写入仓库；线上变量通过 Cloudflare 控制台配置，开发时使用 `.dev.vars`（已加入 `.gitignore`）。
-- 如需撤销授权，可在 GitHub → Settings → Applications 中移除对应 OAuth App。
-- 使用 `GITHUB_REQUIRE_PRIVATE_REPO=true` 时，授权范围会扩大到 `repo`，请确保仅在必要场景启用。
-- `GITHUB_SERVICE_TOKEN` 建议使用 Fine-grained PAT 并保存为 Pages Secret；GitHub 对单 Token 的 API 配额为每小时 5000 次，必要时可提示用户登录并切换为个人授权。
+- OAuth Access Token stored in signed HttpOnly Cookie, accessible only to Pages Functions; `Secure` flag automatically enabled in production.
+- Never commit real secrets to repository; configure production variables via Cloudflare dashboard, use `.dev.vars` for development (added to `.gitignore`).
+- To revoke authorization, remove the OAuth App in GitHub → Settings → Applications.
+- When using `GITHUB_REQUIRE_PRIVATE_REPO=true`, authorization scope expands to `repo`; ensure only enabled when necessary.
+- `GITHUB_SERVICE_TOKEN` should be a Fine-grained PAT saved as Pages Secret; GitHub API quota per token is 5000 requests/hour; prompt users to login and switch to personal authorization when needed.
 
