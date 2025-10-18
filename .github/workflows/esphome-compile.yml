@@ -99,7 +99,7 @@ jobs:
         with:
           name: firmware-${{ env.REQUEST_ID }}
           path: artifact
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
 
       - name: Publish summary
