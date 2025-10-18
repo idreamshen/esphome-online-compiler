@@ -110,9 +110,6 @@ jobs:
           ### ESPHome 编译结果
 
           - 请求 ID：${{ env.REQUEST_ID }}
-          - 设备：${{ env.DEVICE_NAME || '未设置' }}
-          - 板子：${{ env.BOARD_NAME || '未设置' }}
-          - 产物目录：`artifact/`
 
           下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`（内含 config.yaml 与 *.bin 固件）。
           EOF
