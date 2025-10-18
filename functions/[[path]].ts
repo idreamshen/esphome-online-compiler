@@ -482,6 +482,7 @@ async function githubRequest(token: string, url: string, init: RequestInit): Pro
   headers.set('Accept', 'application/vnd.github+json');
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-GitHub-Api-Version', '2022-11-28');
+  headers.set('User-Agent', 'esphome-online-compiler/1.0');
 
   return fetch(url, {
     ...init,
