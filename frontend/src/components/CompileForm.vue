@@ -315,6 +315,12 @@ const statusClass = computed(() => {
   if (status.status === 'completed') {
     return status.conclusion === 'success' ? 'success' : 'error';
   }
+  if (status.status === 'queued') {
+    return 'queued';
+  }
+  if (status.status === 'in_progress') {
+    return 'in-progress';
+  }
   return 'progress';
 });
 
@@ -1305,6 +1311,16 @@ button.loading::after {
 .badge.progress {
   background: rgba(56, 189, 248, 0.2);
   color: #bae6fd;
+}
+
+.badge.queued {
+  background: rgba(253, 224, 71, 0.2);
+  color: #facc15;
+}
+
+.badge.in-progress {
+  background: rgba(129, 140, 248, 0.25);
+  color: #c7d2fe;
 }
 
 .badge.success {
