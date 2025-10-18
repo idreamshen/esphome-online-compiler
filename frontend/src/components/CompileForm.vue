@@ -105,7 +105,7 @@
         </p>
         <p v-if="runUrl">
           <strong>GitHub Workflow：</strong>
-          <a :href="runUrl" target="_blank" rel="noreferrer">打开</a>
+          <button class="link-button" type="button" @click="openRunUrl">打开</button>
         </p>
         <p>
           <strong>解压密码：</strong>
@@ -344,6 +344,14 @@ function restorePassword() {
 
 function regenerateArtifactPassword() {
   artifactPassword.value = generateRandomPassword();
+}
+
+function openRunUrl() {
+  if (!runUrl.value) return;
+  const opened = window.open(runUrl.value, '_blank', 'noopener');
+  if (!opened) {
+    window.location.href = runUrl.value;
+  }
 }
 
 onMounted(() => {
@@ -1064,6 +1072,21 @@ button.loading::after {
 
 .status-card p:last-of-type {
   margin-bottom: 0;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.9);
+  outline-offset: 2px;
 }
 
 .badge {
