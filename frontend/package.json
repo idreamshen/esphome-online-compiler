@@ -12,7 +12,6 @@
   "dependencies": {
     "axios": "^1.6.7",
     "js-base64": "^3.7.5",
-    "pinia": "^2.1.7",
     "vue": "^3.4.21"
   },
   "devDependencies": {

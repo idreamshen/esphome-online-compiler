@@ -1,115 +1,134 @@
 <template>
   <section class="panel">
-    <section class="config">
-      <h2>GitHub 设置</h2>
-      <p class="hint">
-        需要使用拥有 `repo` 与 `workflow` 权限的
-        <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">
-          Personal Access Token
-        </a>
-        （不会离开浏览器）。
+    <section v-if="!sessionLoaded" class="loading-card">
+      <p>正在加载会话...</p>
+    </section>
+
+    <section v-else-if="!isAuthenticated" class="auth-card">
+      <h2>使用 GitHub 授权</h2>
+      <p>
+        点击下方按钮跳转至 GitHub 完成 OAuth 授权（仅请求 `repo` 与 `workflow` 权限），回到页面后即可触发编译。
       </p>
-      <div class="config-grid">
+      <button type="button" @click="login">GitHub 登录</button>
+      <p class="status info">
+        授权过程中不会离开 GitHub 官方页面，也不会将 Token 暴露给第三方。
+      </p>
+    </section>
+
+    <template v-else>
+      <section class="user-card">
+        <div class="user-meta">
+          <img v-if="user?.avatarUrl" :src="user.avatarUrl" alt="avatar" />
+          <div>
+            <p class="user-name">
+              <a :href="user?.htmlUrl || '#'" target="_blank" rel="noreferrer">{{ user?.login }}</a>
+              <span v-if="user?.name">（{{ user.name }}）</span>
+            </p>
+            <p class="repo-info">
+              目标仓库：
+              <strong>{{ repo?.owner }} / {{ repo?.name }}</strong>
+              <span> Workflow：{{ repo?.workflowId }} · 分支：{{ repo?.ref }}</span>
+            </p>
+          </div>
+        </div>
+        <div class="user-actions">
+          <button class="ghost" type="button" @click="logout">退出登录</button>
+        </div>
+      </section>
+
+      <section v-if="missingScopes.length > 0" class="status warning">
+        当前授权缺少以下 scope：{{ missingScopes.join(', ') }}，请退出后重新授权。
+      </section>
+
+      <form class="form" @submit.prevent="handleSubmit">
         <label class="field">
-          <span>GitHub Token</span>
-          <input
-            v-model="githubToken"
-            :type="showToken ? 'text' : 'password'"
-            placeholder="ghp_xxx"
+          <span>ESPHome YAML</span>
+          <textarea
+            v-model="yaml"
+            placeholder="esphome:\n  name: mydevice\n..."
             required
+            rows="18"
           />
         </label>
-        <label class="field">
-          <span>Token 可见</span>
-          <label class="toggle">
-            <input v-model="showToken" type="checkbox" />
-            <span>显示令牌</span>
+
+        <div class="settings">
+          <label class="field">
+            <span>设备标识（可选）</span>
+            <input v-model="deviceName" placeholder="mydevice" maxlength="40" />
           </label>
-        </label>
-        <label class="field">
-          <span>仓库拥有者</span>
-          <input v-model="repoOwner" placeholder="your-github" />
-        </label>
-        <label class="field">
-          <span>仓库名</span>
-          <input v-model="repoName" placeholder="esphome-online-compiler" />
-        </label>
-        <label class="field">
-          <span>Workflow 文件名或 ID</span>
-          <input v-model="workflowId" placeholder="esphome-compile.yml" />
-        </label>
-        <label class="field">
-          <span>触发分支</span>
-          <input v-model="workflowRef" placeholder="main" />
-        </label>
-      </div>
-    </section>
+          <label class="field">
+            <span>板子类型（可选）</span>
+            <input v-model="board" placeholder="esp32dev" maxlength="40" />
+          </label>
+        </div>
 
-    <form class="form" @submit.prevent="handleSubmit">
-      <label class="field">
-        <span>ESPHome YAML</span>
-        <textarea
-          v-model="yaml"
-          placeholder="esphome:\n  name: mydevice\n..."
-          required
-          rows="18"
-        />
-      </label>
+        <div class="actions">
+          <button :disabled="pending || missingScopes.length > 0" type="submit">
+            {{ pending ? '正在提交...' : '提交编译' }}
+          </button>
+          <button
+            :disabled="pending || (!runId && !requestId)"
+            class="ghost"
+            type="button"
+            @click="reset"
+          >
+            重置
+          </button>
+        </div>
+        <p v-if="error" class="status error">{{ error }}</p>
+      </form>
 
-      <div class="settings">
-        <label class="field">
-          <span>设备标识（可选）</span>
-          <input v-model="deviceName" placeholder="mydevice" maxlength="40" />
-        </label>
-        <label class="field">
-          <span>板子类型（可选）</span>
-          <input v-model="board" placeholder="esp32dev" maxlength="40" />
-        </label>
-      </div>
-
-      <div class="actions">
-        <button :disabled="pending" type="submit">
-          {{ pending ? '正在提交...' : '提交编译' }}
-        </button>
-        <button
-          :disabled="pending || (!runId && !requestId)"
-          class="ghost"
-          type="button"
-          @click="reset"
-        >
-          重置
-        </button>
-      </div>
-      <p v-if="error" class="status error">{{ error }}</p>
-    </form>
-
-    <section v-if="requestId" class="status-card">
-      <h2>编译状态</h2>
-      <p><strong>请求 ID：</strong> {{ requestId }}</p>
-      <p v-if="runId"><strong>Workflow Run ID：</strong> {{ runId }}</p>
-      <p>
-        <strong>当前状态：</strong>
-        <span :class="['badge', statusClass]">{{ displayStatus }}</span>
-      </p>
-      <p v-if="runUrl">
-        <strong>GitHub Workflow：</strong>
-        <a :href="runUrl" target="_blank" rel="noreferrer">打开</a>
-      </p>
-      <p v-if="artifact">
-        <strong>固件产物：</strong>
-        <button :disabled="downloadingArtifact" class="ghost" type="button" @click="downloadArtifact">
-          {{ downloadingArtifact ? '下载中...' : `下载 ${artifact.name}.zip` }}
-        </button>
-      </p>
-      <p v-if="statusMessage" class="status info">{{ statusMessage }}</p>
-    </section>
+      <section v-if="requestId" class="status-card">
+        <h2>编译状态</h2>
+        <p><strong>请求 ID：</strong> {{ requestId }}</p>
+        <p v-if="runId"><strong>Workflow Run ID：</strong> {{ runId }}</p>
+        <p>
+          <strong>当前状态：</strong>
+          <span :class="['badge', statusClass]">{{ displayStatus }}</span>
+        </p>
+        <p v-if="runUrl">
+          <strong>GitHub Workflow：</strong>
+          <a :href="runUrl" target="_blank" rel="noreferrer">打开</a>
+        </p>
+        <p v-if="artifact && artifactUrl">
+          <strong>固件产物：</strong>
+          <button
+            :disabled="downloadingArtifact"
+            class="ghost"
+            type="button"
+            @click="downloadArtifact"
+          >
+            {{ downloadingArtifact ? '下载中...' : `下载 ${artifact.name}.zip` }}
+          </button>
+        </p>
+        <p v-if="statusMessage" class="status info">{{ statusMessage }}</p>
+      </section>
+    </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import axios from 'axios';
 import { Base64 } from 'js-base64';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+
+type SessionPayload = {
+  authenticated: boolean;
+  user?: {
+    login: string;
+    name: string | null;
+    avatarUrl: string | null;
+    htmlUrl: string | null;
+  } | null;
+  tokenScopes?: string[];
+  missingScopes?: string[];
+  repo?: {
+    owner: string;
+    name: string;
+    workflowId: string;
+    ref: string;
+  } | null;
+};
 
 type WorkflowStatus = {
   status: string;
@@ -117,40 +136,26 @@ type WorkflowStatus = {
   message: string;
 };
 
-type WorkflowRun = {
-  id: number;
-  status: string;
-  conclusion: string | null;
-  html_url: string;
-  name?: string | null;
-  head_commit?: {
-    message?: string;
-  } | null;
-};
-
-type WorkflowArtifact = {
+type ArtifactMeta = {
   id: number;
   name: string;
-  archive_download_url: string;
-  expired: boolean;
 };
 
-const STORAGE_KEY = 'esphome-online-compiler-settings';
+const client = axios.create({
+  withCredentials: true
+});
+
+const session = ref<SessionPayload | null>(null);
+const sessionLoaded = ref(false);
 
 const yaml = ref('');
 const deviceName = ref('');
 const board = ref('');
-const githubToken = ref('');
-const showToken = ref(false);
-const repoOwner = ref('');
-const repoName = ref('');
-const workflowId = ref('esphome-compile.yml');
-const workflowRef = ref('main');
-
 const runId = ref<number | null>(null);
 const requestId = ref<string | null>(null);
 const runUrl = ref<string | null>(null);
-const artifact = ref<WorkflowArtifact | null>(null);
+const artifactUrl = ref<string | null>(null);
+const artifact = ref<ArtifactMeta | null>(null);
 const pending = ref(false);
 const downloadingArtifact = ref(false);
 const error = ref<string | null>(null);
@@ -161,6 +166,11 @@ const status = reactive<WorkflowStatus>({
   conclusion: '',
   message: ''
 });
+
+const isAuthenticated = computed(() => Boolean(session.value?.authenticated));
+const user = computed(() => session.value?.user ?? null);
+const repo = computed(() => session.value?.repo ?? null);
+const missingScopes = computed(() => session.value?.missingScopes ?? []);
 
 const displayStatus = computed(() => {
   if (!status.status) return '尚未开始';
@@ -182,47 +192,30 @@ const statusClass = computed(() => {
 
 const statusMessage = computed(() => status.message || '');
 
-const apiHeaders = computed(() => {
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28'
-  };
-  const token = githubToken.value.trim();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
-});
-
 onMounted(() => {
-  try {
-    const storedRaw = window.localStorage.getItem(STORAGE_KEY);
-    if (storedRaw) {
-      const stored = JSON.parse(storedRaw) as {
-        repoOwner?: string;
-        repoName?: string;
-        workflowId?: string;
-        workflowRef?: string;
-      };
-      repoOwner.value = stored.repoOwner ?? '';
-      repoName.value = stored.repoName ?? '';
-      workflowId.value = stored.workflowId ?? 'esphome-compile.yml';
-      workflowRef.value = stored.workflowRef ?? 'main';
-    }
-  } catch (err) {
-    console.warn('Failed to load stored settings', err);
-  }
+  loadSession();
 });
 
-watch([repoOwner, repoName, workflowId, workflowRef], () => {
-  const payload = {
-    repoOwner: repoOwner.value,
-    repoName: repoName.value,
-    workflowId: workflowId.value,
-    workflowRef: workflowRef.value
-  };
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-});
+async function loadSession() {
+  sessionLoaded.value = false;
+  try {
+    const { data } = await client.get<SessionPayload>('/api/session');
+    session.value = data;
+  } catch (err) {
+    console.error('加载 session 失败', err);
+    session.value = { authenticated: false };
+  } finally {
+    sessionLoaded.value = true;
+  }
+}
+
+function login() {
+  window.location.href = '/auth/login';
+}
+
+function logout() {
+  window.location.href = '/auth/logout';
+}
 
 async function handleSubmit() {
   if (!yaml.value.trim()) {
@@ -235,53 +228,45 @@ async function handleSubmit() {
     return;
   }
 
-  if (!githubToken.value.trim()) {
-    error.value = '请提供 GitHub Token';
-    return;
-  }
-
-  if (!repoOwner.value.trim() || !repoName.value.trim() || !workflowId.value.trim()) {
-    error.value = '请完整填写仓库信息与 workflow 标识';
+  if (missingScopes.value.length > 0) {
+    error.value = '当前授权缺少必要的 GitHub 权限，请重新授权';
     return;
   }
 
   pending.value = true;
   error.value = null;
   artifact.value = null;
-  requestId.value = window.crypto.randomUUID();
-  status.status = 'queued';
-  status.conclusion = '';
-  status.message = 'Workflow 已触发，等待运行...';
+  artifactUrl.value = null;
 
   try {
     const payload = {
-      ref: workflowRef.value.trim() || 'main',
-      inputs: {
-        encoded_yaml: Base64.encode(yaml.value),
-        request_id: requestId.value,
-        ...(deviceName.value ? { device_name: deviceName.value } : {}),
-        ...(board.value ? { board: board.value } : {})
-      }
+      encodedYaml: Base64.encode(yaml.value),
+      deviceName: deviceName.value || undefined,
+      board: board.value || undefined
     };
 
-    await axios.post(
-      `https://api.github.com/repos/${repoOwner.value}/${repoName.value}/actions/workflows/${workflowId.value}/dispatches`,
-      payload,
-      {
-        headers: apiHeaders.value
-      }
-    );
+    const { data } = await client.post<{
+      requestId: string;
+      runId: number | null;
+      htmlUrl?: string | null;
+      message?: string | null;
+    }>('/api/compile', payload, {
+      headers: { 'Content-Type': 'application/json' }
+    });
 
-    runId.value = null;
-    runUrl.value = null;
+    requestId.value = data.requestId;
+    runId.value = data.runId;
+    runUrl.value = data.htmlUrl ?? null;
+    status.status = 'queued';
+    status.conclusion = '';
+    status.message = data.message ?? 'Workflow 已触发，等待运行...';
     startPolling();
   } catch (err) {
-    console.error(err);
+    console.error('触发编译失败', err);
     error.value =
       axios.isAxiosError(err) && err.response?.data?.message
         ? err.response.data.message
         : '触发编译失败，请稍后再试';
-    requestId.value = null;
   } finally {
     pending.value = false;
   }
@@ -308,77 +293,53 @@ async function refreshStatus() {
     return;
   }
 
-  if (!runId.value) {
-    const run = await findRunByRequestId(requestId.value);
-    if (!run) {
-      status.message = 'Workflow 正在初始化...';
-      return;
-    }
-    runId.value = run.id;
-    runUrl.value = run.html_url;
-  }
+  const target = runId.value ? String(runId.value) : requestId.value;
+  const { data } = await client.get<{
+    runId: number;
+    status: string;
+    conclusion: string | null;
+    htmlUrl: string | null;
+    artifactUrl: string | null;
+    artifact: ArtifactMeta | null;
+    message: string | null;
+  }>(`/api/status/${encodeURIComponent(target)}`);
 
-  if (!runId.value) return;
+  runId.value = data.runId ?? runId.value;
+  runUrl.value = data.htmlUrl ?? runUrl.value;
+  artifactUrl.value = data.artifactUrl ?? null;
+  artifact.value = data.artifact ?? null;
+  status.status = data.status ?? '';
+  status.conclusion = data.conclusion ?? '';
+  status.message = data.message ?? '';
 
-  const { data: runData } = await axios.get<WorkflowRun>(
-    `https://api.github.com/repos/${repoOwner.value}/${repoName.value}/actions/runs/${runId.value}`,
-    { headers: apiHeaders.value }
-  );
-
-  status.status = runData.status ?? '';
-  status.conclusion = runData.conclusion ?? '';
-  status.message = runData.name ?? runData.head_commit?.message ?? '';
-  runUrl.value = runData.html_url ?? runUrl.value;
-
-  const { data: artifactData } = await axios.get<{ artifacts: WorkflowArtifact[] }>(
-    `https://api.github.com/repos/${repoOwner.value}/${repoName.value}/actions/runs/${runId.value}/artifacts`,
-    { headers: apiHeaders.value }
-  );
-
-  artifact.value =
-    artifactData.artifacts.find((item) => !item.expired) ?? artifact.value ?? null;
-
-  if (status.status === 'completed') {
+  if (data.status === 'completed') {
     clearPolling();
   }
 }
 
-async function findRunByRequestId(reqId: string) {
-  const { data } = await axios.get<{ workflow_runs: WorkflowRun[] }>(
-    `https://api.github.com/repos/${repoOwner.value}/${repoName.value}/actions/workflows/${workflowId.value}/runs`,
-    {
-      headers: apiHeaders.value,
-      params: {
-        event: 'workflow_dispatch',
-        per_page: 25
-      }
-    }
-  );
-
-  return data.workflow_runs.find((run) => run.name?.includes(reqId));
-}
-
 async function downloadArtifact() {
-  if (!artifact.value) return;
+  if (!artifactUrl.value) return;
   downloadingArtifact.value = true;
 
   try {
-    const response = await axios.get<ArrayBuffer>(artifact.value.archive_download_url, {
-      headers: apiHeaders.value,
+    const response = await client.get<ArrayBuffer>(artifactUrl.value, {
       responseType: 'arraybuffer'
     });
     const blob = new Blob([response.data], { type: 'application/zip' });
     const blobUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = blobUrl;
-    link.download = `${artifact.value.name}.zip`;
+    link.download = `${artifact.value?.name ?? 'firmware'}.zip`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.URL.revokeObjectURL(blobUrl);
   } catch (err) {
     console.error('下载产物失败', err);
-    error.value = '下载固件失败，请检查 Token 权限或稍后重试';
+    error.value =
+      axios.isAxiosError(err) && err.response?.data?.message
+        ? err.response.data.message
+        : '下载固件失败，请检查权限或稍后重试';
   } finally {
     downloadingArtifact.value = false;
   }
@@ -398,6 +359,7 @@ function reset() {
   runId.value = null;
   requestId.value = null;
   runUrl.value = null;
+  artifactUrl.value = null;
   artifact.value = null;
   status.status = '';
   status.conclusion = '';
@@ -424,31 +386,67 @@ onBeforeUnmount(() => {
   gap: 1.5rem;
 }
 
-.config {
+.loading-card,
+.auth-card {
+  text-align: center;
+  padding: 2rem 1rem;
   background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
-  padding: 1rem 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
-.config h2 {
-  margin: 0 0 0.5rem;
+.auth-card h2 {
+  margin-top: 0;
 }
 
-.hint {
-  margin: 0 0 1rem;
-  color: #cbd5f5;
-  font-size: 0.85rem;
-}
-
-.hint a {
-  color: #38bdf8;
-}
-
-.config-grid {
-  display: grid;
+.user-card {
+  display: flex;
+  justify-content: space-between;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: center;
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 1rem;
+  flex-wrap: wrap;
+}
+
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.user-meta img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.3);
+}
+
+.user-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.user-name a {
+  color: #f8fafc;
+  text-decoration: none;
+}
+
+.user-name a:hover {
+  text-decoration: underline;
+}
+
+.repo-info {
+  margin: 0.1rem 0 0;
+  color: #cbd5f5;
+  font-size: 0.9rem;
+}
+
+.user-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .form {
@@ -463,12 +461,10 @@ onBeforeUnmount(() => {
   color: #e2e8f0;
 }
 
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: #cbd5f5;
+.settings {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 textarea {
@@ -553,6 +549,10 @@ button:disabled {
   color: #bae6fd;
 }
 
+.status.warning {
+  color: #fef08a;
+}
+
 .status-card {
   background: rgba(30, 41, 59, 0.65);
   padding: 1.25rem;
@@ -591,11 +591,5 @@ button:disabled {
 .badge.error {
   background: rgba(248, 113, 113, 0.2);
   color: #fecaca;
-}
-
-.settings {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 </style>

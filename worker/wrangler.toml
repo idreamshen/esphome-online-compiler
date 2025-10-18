@@ -1,0 +1,15 @@
+name = "esphome-online-compiler-worker"
+main = "src/index.ts"
+compatibility_date = "2024-06-20"
+
+[vars]
+# GITHUB_CLIENT_ID = ""
+# GITHUB_CLIENT_SECRET = ""
+# GITHUB_OAUTH_REDIRECT_URI = "https://your-worker-domain.workers.dev/auth/callback"
+# SESSION_SECRET = ""
+# GITHUB_REPO_OWNER = "your-github-account"
+# GITHUB_REPO_NAME = "esphome-online-compiler"
+# GITHUB_WORKFLOW_ID = "esphome-compile.yml"
+# GITHUB_WORKFLOW_REF = "main"
+# FRONTEND_URL = "https://frontend.example.com"
+# ALLOWED_ORIGINS = "https://frontend.example.com"
