@@ -1,36 +1,34 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `frontend/`: Vite + Vue 3 SPA; key modules live in `src/components/` (UI + session state), `src/stores/` (persistence helpers), and `src/services/` (GitHub workflow client).
-- `functions/[[path]].ts`: Cloudflare Pages Function routing `/auth/*` and `/api/*`, handling OAuth, session cookies, and GitHub API proxying.
-- `.github/workflows/esphome-compile.yml`: Workflow that compiles ESPHome firmware, uploads artifacts, and tags runs by `request_id`.
-- `.dev.vars.example`: Template for local secrets; copy to `.dev.vars` during development.
+- `frontend/` – Vue 3 + Vite SPA; UI logic lives in `src/components/` (notably `CompileForm.vue`), app bootstrap in `src/main.ts`, shared styles in `src/style.scss`.
+- `functions/[[path]].ts` – Cloudflare Pages Function handling `/auth/*` and `/api/*`, including OAuth, session cookies, GitHub workflow triggers, status polling, and artifact proxying.
+- `.github/workflows/esphome-compile.yml` – GitHub Actions workflow compiling ESPHome firmware and publishing a zipped artifact tagged with the `request_id`.
+- `.dev.vars.example` – template for Wrangler local secrets; copy to `.dev.vars` before running `wrangler pages dev`.
 
 ## Build, Test, and Development Commands
-- `npm install --prefix frontend`: Install front-end dependencies; run after cloning or updating lockfile.
-- `npm run dev --prefix frontend`: Start Vite dev server at `http://localhost:5173`, proxying API calls to local Pages Functions.
-- `npm run build --prefix frontend`: Generate production assets in `frontend/dist/` for Pages deployments.
-- `npm run lint --prefix frontend`: Run ESLint (`.ts`, `.vue`) to enforce style and catch obvious defects.
-- `wrangler pages dev frontend/dist --local --port 8787`: Emulate Pages Functions locally; requires `.dev.vars`.
+- `npm install --prefix frontend` – install front-end dependencies after cloning or when the lockfile changes.
+- `npm run dev --prefix frontend` – start the Vite dev server; pair with `wrangler pages dev frontend --local --port 8787` to emulate Pages Functions.
+- `npm run build --prefix frontend` – produce production assets in `frontend/dist/`.
+- `npm run lint --prefix frontend` – execute ESLint over `.ts` and `.vue` sources to catch regressions early.
+- `wrangler pages deploy` – publish the latest `dist/` bundle and `functions/` code to Cloudflare Pages (requires authenticated Wrangler session).
 
 ## Coding Style & Naming Conventions
-- Follow ESLint + Vue 3 defaults; prefer single-file components with `<script setup lang="ts">` and 2-space indentation.
-- Use `kebab-case` for Vue component filenames (`CompileForm.vue` is the lone PascalCase exception), and camelCase for composables/stores.
-- Keep Pages Function helpers pure and colocated; export HTTP handlers as named async functions for testability.
-- Run `npm run lint --prefix frontend` before pushing to confirm formatting and rule compliance.
+- TypeScript-first Vue components using `<script setup>` and two-space indentation.
+- Component filenames stay PascalCase (`CompileForm.vue`), while helpers/assets follow kebab-case (`workflow-client.ts`, `style.scss`).
+- Keep GitHub/API helpers colocated with their consumer; prefer async/await with explicit error messages surfaced to users.
 
 ## Testing Guidelines
-- No automated test suite yet; rely on manual verification of login, workflow trigger, artifact download, and refresh persistence.
-- When adding tests, colocate Vitest specs under `frontend/src/**/__tests__/` with filenames `<unit>.spec.ts`.
-- Validate OAuth/session changes against both local (`wrangler pages dev`) and deployed Pages environments to catch cookie/domain issues.
+- Current validation is manual: confirm OAuth login, service-token fallback, workflow trigger, artifact download, and refresh persistence whenever logic changes.
+- Future automated tests should live under `frontend/src/__tests__/` using Vitest (`<component>.spec.ts`) with MSW or simple stubs for GitHub APIs.
+- Exercise Cloudflare endpoints locally via `wrangler pages dev frontend --local` to confirm cookies, headers, and rate-limit handling before deploying.
 
 ## Commit & Pull Request Guidelines
-- Commits follow Conventional Commit prefixes (`feat`, `chore`, `docs`, `refactor`, etc.); keep messages under ~72 chars and describe the user-facing effect.
-- Group related changes per commit; avoid mixing front-end UX updates with workflow YAML tweaks.
-- Pull requests should summarize the user impact, list testing evidence (commands, screenshots), and reference related issues or discussions.
+- Follow Conventional Commits (`feat`, `fix`, `chore`, `docs`, etc.) with concise (<72 char) imperatives describing observable impact.
+- Commit related changes together; avoid mixing UI tweaks, workflow YAML edits, and infrastructure updates unless tightly coupled.
+- PRs should summarize behaviour changes, list verification steps (`npm run build`, manual flow checks), and call out required secret or configuration updates.
 
 ## Security & Configuration Tips
-- Never commit secrets; use `.dev.vars` locally and Cloudflare Pages → Settings → Variables for staging/production.
-- Required environment keys: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `GITHUB_REPO_*`, `GITHUB_WORKFLOW_*`, `FRONTEND_URL`, `ALLOWED_ORIGINS`; optionally set `GITHUB_SERVICE_TOKEN` for the shared PAT fallback.
-- Enforce least privilege: default to GitHub `workflow` + `public_repo`; only enable `repo` scope when targeting private repositories and scope the service token accordingly.
-- Cloudflare Pages Functions prefer the shared `GITHUB_SERVICE_TOKEN` and automatically fall back to the authenticated user token on 401/403/429 responses, so handle both paths when debugging.
+- Do not commit secrets; store local values in `.dev.vars`, production secrets in Cloudflare Pages → Settings → Variables.
+- Required env vars: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `GITHUB_SERVICE_TOKEN`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_WORKFLOW_ID`, `GITHUB_WORKFLOW_REF`, and `FRONTEND_URL`.
+- Monitor 401/403/429 responses to determine when to rotate the shared service token; the UI automatically falls back to personal OAuth when the platform token is degraded.
