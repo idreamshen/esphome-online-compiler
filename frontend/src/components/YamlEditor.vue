@@ -7,7 +7,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { yaml } from '@codemirror/lang-yaml';
+import { yaml as yamlLang } from '@codemirror/lang-yaml';
 import { HighlightStyle, syntaxHighlighting, bracketMatching } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags } from '@lezer/highlight';
@@ -121,7 +121,7 @@ onMounted(() => {
         ...defaultKeymap,
         ...historyKeymap
       ]),
-      yaml(),
+      yamlLang(),
       customTheme,
       EditorView.lineWrapping,
       EditorView.updateListener.of((update) => {

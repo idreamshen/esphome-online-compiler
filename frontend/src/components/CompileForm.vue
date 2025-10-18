@@ -15,7 +15,6 @@
           <YamlEditor
             v-model="yaml"
             :placeholder="YAML_PLACEHOLDER"
-            :schema-uri="ESPHOME_SCHEMA_URI"
           />
         </label>
 
@@ -257,7 +256,6 @@ const STORAGE_VERSION_KEY = 'esphome-online-compiler:esphome-version';
 const YAML_PLACEHOLDER = `esphome:
   name: mydevice
 ...`;
-const ESPHOME_SCHEMA_URI = 'https://schema.esphome.io/2025.9.1/esphome.json';
 
 const ESPHOME_VERSION_OPTIONS = [
   { value: '', label: '最新稳定版（自动）' },
