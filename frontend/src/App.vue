@@ -2,7 +2,6 @@
   <main class="app">
     <section class="hero">
       <h1>ESPHome 在线编译</h1>
-      <p>输入 ESPHome YAML，提交给 GitHub Actions 完成编译并下载固件。</p>
     </section>
     <CompileForm />
   </main>
