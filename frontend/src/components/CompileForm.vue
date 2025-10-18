@@ -890,6 +890,18 @@ button.loading::after {
   margin-top: 0;
 }
 
+.status-card p {
+  margin: 0.4rem 0;
+}
+
+.status-card p:first-of-type {
+  margin-top: 0.15rem;
+}
+
+.status-card p:last-of-type {
+  margin-bottom: 0;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
