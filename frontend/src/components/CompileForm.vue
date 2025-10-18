@@ -25,20 +25,14 @@
         </div>
       </section>
 
-      <section v-else class="auth-banner">
-        <h2>GitHub 授权</h2>
-        <p>
-          点击下方按钮跳转至 GitHub 完成授权（仅请求 `public_repo`/`repo` 与 `workflow` 权限），即可在本页面提交编译。
-        </p>
-        <button type="button" @click="login">GitHub 登录</button>
-        <p class="status info">登录后即可触发编译并下载固件。</p>
-      </section>
-
       <section v-if="isAuthenticated && missingScopes.length > 0" class="status warning">
         当前授权缺少以下 scope：{{ missingScopes.join(', ') }}，请退出后重新授权。
       </section>
 
       <form class="form" @submit.prevent="handleSubmit">
+        <div v-if="!isAuthenticated" class="auth-inline">
+          <button type="button" class="ghost mini" @click="login">GitHub 登录</button>
+        </div>
         <label class="field">
           <span>ESPHome YAML</span>
           <textarea
@@ -62,7 +56,25 @@
             重置
           </button>
         </div>
-        <p v-if="!isAuthenticated" class="status info">请先登录 GitHub 后再提交编译。</p>
+        <div v-if="shouldEncouragePersonal" class="personal-hint">
+          <p class="hint">
+            {{
+              isAuthenticated
+                ? '平台 GitHub 授权当前不可用，已自动切换为个人授权。'
+                : '平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。'
+            }}
+          </p>
+          <button
+            v-if="!isAuthenticated"
+            type="button"
+            class="ghost mini"
+            @click="login"
+          >
+            去授权
+          </button>
+        </div>
+        <p v-if="tokenInfo" class="status info">{{ tokenInfo }}</p>
+        <p v-if="submitHint" class="status warning">{{ submitHint }}</p>
         <p v-if="error" class="status error">{{ error }}</p>
       </form>
 
@@ -89,6 +101,10 @@
             {{ downloadingArtifact ? '下载中...' : `下载 ${artifact.name}.zip` }}
           </button>
         </p>
+        <p v-if="lastTokenSource" class="status info">
+          <strong>凭据来源：</strong>
+          <span>{{ lastTokenSource === 'service' ? '平台 GitHub 授权' : '个人 GitHub 授权' }}</span>
+        </p>
         <p v-if="statusMessage" class="status info">{{ statusMessage }}</p>
       </section>
     </template>
@@ -100,8 +116,12 @@ import axios from 'axios';
 import { Base64 } from 'js-base64';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
+type TokenSource = 'service' | 'session';
+
 type SessionPayload = {
   authenticated: boolean;
+  serviceTokenAvailable?: boolean;
+  defaultTokenSource?: TokenSource | null;
   user?: {
     login: string;
     name: string | null;
@@ -136,6 +156,12 @@ type PersistedJobState = {
   status: WorkflowStatus;
   artifact: ArtifactMeta | null;
   artifactUrl: string | null;
+  tokenSource: TokenSource | null;
+};
+
+type ApiErrorPayload = {
+  message?: string;
+  serviceTokenDegraded?: boolean;
 };
 
 const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
@@ -158,6 +184,9 @@ const pending = ref(false);
 const downloadingArtifact = ref(false);
 const error = ref<string | null>(null);
 const pollTimer = ref<number | null>(null);
+const preferPersonalToken = ref(false);
+const lastTokenSource = ref<TokenSource | null>(null);
+const serviceTokenDegraded = ref(false);
 
 const status = reactive<WorkflowStatus>({
   status: '',
@@ -169,7 +198,46 @@ const isAuthenticated = computed(() => Boolean(session.value?.authenticated));
 const user = computed(() => session.value?.user ?? null);
 const repo = computed(() => session.value?.repo ?? null);
 const missingScopes = computed(() => session.value?.missingScopes ?? []);
-const canSubmit = computed(() => isAuthenticated.value && missingScopes.value.length === 0);
+const serviceTokenAvailable = computed(() => Boolean(session.value?.serviceTokenAvailable));
+const canUsePersonalToken = computed(
+  () => isAuthenticated.value && missingScopes.value.length === 0
+);
+const shouldEncouragePersonal = computed(
+  () => !serviceTokenAvailable.value || serviceTokenDegraded.value
+);
+const canSubmit = computed(() => {
+  if (preferPersonalToken.value) {
+    return canUsePersonalToken.value;
+  }
+  if (serviceTokenAvailable.value && !serviceTokenDegraded.value) {
+    return true;
+  }
+  return canUsePersonalToken.value;
+});
+const submitHint = computed(() => {
+  if (canSubmit.value) {
+    return null;
+  }
+  if (!isAuthenticated.value) {
+    return '请先完成 GitHub 授权后再提交编译。';
+  }
+  if (missingScopes.value.length > 0) {
+    return '当前 GitHub 授权缺少 workflow/public_repo 权限，请重新授权后再试。';
+  }
+  return null;
+});
+const tokenInfo = computed(() => {
+  if (preferPersonalToken.value && canUsePersonalToken.value) {
+    return '将使用个人 GitHub 授权触发编译。';
+  }
+  if (!preferPersonalToken.value && serviceTokenAvailable.value && !serviceTokenDegraded.value) {
+    return '将使用平台提供的 GitHub 授权触发编译。';
+  }
+  if (!serviceTokenAvailable.value && canUsePersonalToken.value) {
+    return '将使用个人 GitHub 授权触发编译。';
+  }
+  return null;
+});
 
 const displayStatus = computed(() => {
   if (!status.status) return '尚未开始';
@@ -191,6 +259,15 @@ const statusClass = computed(() => {
 
 const statusMessage = computed(() => status.message || '');
 
+function applyServiceTokenDegraded(payload: ApiErrorPayload | undefined) {
+  if (payload?.serviceTokenDegraded) {
+    serviceTokenDegraded.value = true;
+    if (isAuthenticated.value && missingScopes.value.length === 0) {
+      preferPersonalToken.value = true;
+    }
+  }
+}
+
 onMounted(() => {
   restoreDraft();
   loadSession();
@@ -211,17 +288,39 @@ watch(yaml, (value) => {
   }
 });
 
+watch([isAuthenticated, shouldEncouragePersonal], ([authed, encourage]) => {
+  if (encourage && authed && missingScopes.value.length === 0) {
+    preferPersonalToken.value = true;
+  } else if (!authed) {
+    preferPersonalToken.value = false;
+  }
+});
+
+watch(missingScopes, (scopes) => {
+  if (scopes.length > 0) {
+    preferPersonalToken.value = false;
+  }
+});
+
 async function loadSession() {
   sessionLoaded.value = false;
   try {
     const { data } = await client.get<SessionPayload>('/api/session');
     session.value = data;
+    serviceTokenDegraded.value = !data.serviceTokenAvailable;
+    if (!data.serviceTokenAvailable && data.authenticated && (data.missingScopes?.length ?? 0) === 0) {
+      preferPersonalToken.value = true;
+    } else if (data.serviceTokenAvailable) {
+      preferPersonalToken.value = false;
+    }
   } catch (err) {
     console.error('加载 session 失败', err);
     session.value = { authenticated: false };
+    preferPersonalToken.value = false;
+    serviceTokenDegraded.value = true;
   } finally {
     sessionLoaded.value = true;
-    if (session.value?.authenticated) {
+    if (isAuthenticated.value || serviceTokenAvailable.value) {
       restoreJobState();
     } else {
       clearJobState();
@@ -239,11 +338,6 @@ function logout() {
 }
 
 async function handleSubmit() {
-  if (!isAuthenticated.value) {
-    error.value = '请先登录 GitHub 后再提交编译';
-    return;
-  }
-
   if (!yaml.value.trim()) {
     error.value = '请输入有效的 YAML 内容';
     return;
@@ -254,8 +348,19 @@ async function handleSubmit() {
     return;
   }
 
-  if (missingScopes.value.length > 0) {
-    error.value = '当前授权缺少必要的 GitHub 权限，请重新授权';
+  const wantsPersonalToken =
+    preferPersonalToken.value || !serviceTokenAvailable.value || serviceTokenDegraded.value;
+  if (wantsPersonalToken) {
+    if (!isAuthenticated.value) {
+      error.value = '请先登录 GitHub 后再提交编译';
+      return;
+    }
+    if (!canUsePersonalToken.value) {
+      error.value = '当前授权缺少必要的 GitHub 权限，请重新授权';
+      return;
+    }
+  } else if (!serviceTokenAvailable.value && !isAuthenticated.value) {
+    error.value = '请先登录 GitHub 后再提交编译';
     return;
   }
 
@@ -263,17 +368,32 @@ async function handleSubmit() {
   error.value = null;
 
   try {
-    const payload = {
+    const payload: {
+      encodedYaml: string;
+      useUserToken?: boolean;
+    } = {
       encodedYaml: Base64.encode(yaml.value)
     };
+
+    if (wantsPersonalToken && canUsePersonalToken.value) {
+      payload.useUserToken = true;
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    if (wantsPersonalToken && canUsePersonalToken.value) {
+      headers['X-GitHub-Token-Source'] = 'session';
+    }
 
     const { data } = await client.post<{
       requestId: string;
       runId: number | null;
       htmlUrl?: string | null;
       message?: string | null;
+      tokenSource?: TokenSource | null;
     }>('/api/compile', payload, {
-      headers: { 'Content-Type': 'application/json' }
+      headers
     });
 
     artifact.value = null;
@@ -284,14 +404,37 @@ async function handleSubmit() {
     status.status = 'queued';
     status.conclusion = '';
     status.message = data.message ?? 'Workflow 已触发，等待运行...';
+    const resolvedSource =
+      data.tokenSource ??
+      (wantsPersonalToken && canUsePersonalToken.value
+        ? 'session'
+        : serviceTokenAvailable.value && !serviceTokenDegraded.value
+        ? 'service'
+        : canUsePersonalToken.value
+        ? 'session'
+        : null);
+    lastTokenSource.value = resolvedSource;
+    if (resolvedSource === 'service' && serviceTokenAvailable.value) {
+      serviceTokenDegraded.value = false;
+      if (!shouldEncouragePersonal.value) {
+        preferPersonalToken.value = false;
+      }
+    } else if (resolvedSource === 'session') {
+      serviceTokenDegraded.value = true;
+      if (isAuthenticated.value && missingScopes.value.length === 0) {
+        preferPersonalToken.value = true;
+      }
+    }
     persistJobState();
     startPolling();
   } catch (err) {
     console.error('触发编译失败', err);
-    error.value =
-      axios.isAxiosError(err) && err.response?.data?.message
-        ? err.response.data.message
-        : '触发编译失败，请稍后再试';
+    const payload = axios.isAxiosError(err)
+      ? (err.response?.data as ApiErrorPayload | undefined)
+      : undefined;
+    const message = payload?.message ?? '触发编译失败，请稍后再试';
+    error.value = message;
+    applyServiceTokenDegraded(payload);
   } finally {
     pending.value = false;
   }
@@ -304,10 +447,12 @@ function startPolling() {
       await refreshStatus();
     } catch (err) {
       console.error('刷新状态失败', err);
-      error.value =
-        axios.isAxiosError(err) && err.response?.data?.message
-          ? err.response.data.message
-          : '获取状态失败';
+      const payload = axios.isAxiosError(err)
+        ? (err.response?.data as ApiErrorPayload | undefined)
+        : undefined;
+      const message = payload?.message ?? '获取状态失败';
+      error.value = message;
+      applyServiceTokenDegraded(payload);
       clearPolling();
     }
   }, 10_000);
@@ -319,6 +464,10 @@ async function refreshStatus() {
   }
 
   const target = runId.value ? String(runId.value) : requestId.value;
+    const tokenHeaders =
+      (preferPersonalToken.value || serviceTokenDegraded.value) && canUsePersonalToken.value
+        ? { 'X-GitHub-Token-Source': 'session' }
+        : undefined;
   const { data } = await client.get<{
     runId: number;
     status: string;
@@ -327,7 +476,9 @@ async function refreshStatus() {
     artifactUrl: string | null;
     artifact: ArtifactMeta | null;
     message: string | null;
-  }>(`/api/status/${encodeURIComponent(target)}`);
+  }>(`/api/status/${encodeURIComponent(target)}`, {
+    headers: tokenHeaders
+  });
 
   runId.value = data.runId ?? runId.value;
   runUrl.value = data.htmlUrl ?? runUrl.value;
@@ -349,8 +500,13 @@ async function downloadArtifact() {
   downloadingArtifact.value = true;
 
   try {
+    const tokenHeaders =
+      (preferPersonalToken.value || serviceTokenDegraded.value) && canUsePersonalToken.value
+        ? { 'X-GitHub-Token-Source': 'session' }
+        : undefined;
     const response = await client.get<ArrayBuffer>(artifactUrl.value, {
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      headers: tokenHeaders
     });
     const blob = new Blob([response.data], { type: 'application/zip' });
     const blobUrl = window.URL.createObjectURL(blob);
@@ -364,10 +520,12 @@ async function downloadArtifact() {
     persistJobState();
   } catch (err) {
     console.error('下载产物失败', err);
-    error.value =
-      axios.isAxiosError(err) && err.response?.data?.message
-        ? err.response.data.message
-        : '下载固件失败，请检查权限或稍后重试';
+    const payload = axios.isAxiosError(err)
+      ? (err.response?.data as ApiErrorPayload | undefined)
+      : undefined;
+    const message = payload?.message ?? '下载固件失败，请检查权限或稍后重试';
+    error.value = message;
+    applyServiceTokenDegraded(payload);
   } finally {
     downloadingArtifact.value = false;
   }
@@ -394,7 +552,7 @@ function restoreJobState() {
   if (typeof window === 'undefined') {
     return;
   }
-  if (!session.value?.authenticated) {
+  if (!isAuthenticated.value && !serviceTokenAvailable.value) {
     clearPersistedJob();
     return;
   }
@@ -415,6 +573,16 @@ function restoreJobState() {
     status.conclusion = saved.status?.conclusion ?? '';
     status.message = saved.status?.message ?? '';
     artifact.value = saved.artifact ?? null;
+    lastTokenSource.value = saved.tokenSource ?? null;
+
+    if (saved.tokenSource === 'session') {
+      serviceTokenDegraded.value = true;
+      if (serviceTokenAvailable.value && canUsePersonalToken.value) {
+        preferPersonalToken.value = true;
+      }
+    } else if (saved.tokenSource === 'service' && serviceTokenAvailable.value) {
+      serviceTokenDegraded.value = false;
+    }
 
     if (saved.artifactUrl) {
       artifactUrl.value = saved.artifactUrl;
@@ -459,7 +627,8 @@ function persistJobState() {
       message: status.message
     },
     artifact: artifact.value ? { ...artifact.value } : null,
-    artifactUrl: artifactUrl.value
+    artifactUrl: artifactUrl.value,
+    tokenSource: lastTokenSource.value ?? null
   };
 
   try {
@@ -497,6 +666,7 @@ function clearJobState() {
   status.status = '';
   status.conclusion = '';
   status.message = '';
+  lastTokenSource.value = null;
   error.value = null;
   downloadingArtifact.value = false;
   pending.value = false;
@@ -525,17 +695,12 @@ onBeforeUnmount(() => {
   gap: 1.5rem;
 }
 
-.loading-card,
-.auth-banner {
+.loading-card {
   text-align: center;
   padding: 2rem 1rem;
   background: rgba(30, 41, 59, 0.6);
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.auth-banner h2 {
-  margin-top: 0;
 }
 
 .user-card {
@@ -593,6 +758,12 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
 }
 
+.auth-inline {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -0.5rem;
+}
+
 .field {
   display: grid;
   gap: 0.5rem;
@@ -620,7 +791,7 @@ textarea:focus {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
 }
 
-input {
+input:not([type='checkbox']) {
   height: 40px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.25);
@@ -629,7 +800,7 @@ input {
   color: #f8fafc;
 }
 
-input:focus {
+input:not([type='checkbox']):focus {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
@@ -667,6 +838,26 @@ button:disabled {
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.4);
   color: #e2e8f0;
+}
+
+.ghost.mini {
+  padding: 0.35rem 1rem;
+  font-size: 0.82rem;
+  border-radius: 999px;
+}
+
+.personal-hint {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.personal-hint .hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #fef08a;
 }
 
 .status {

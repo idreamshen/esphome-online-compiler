@@ -1,6 +1,6 @@
 # ESPHome 在线编译平台
 
-Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户完成 GitHub OAuth 授权后，在浏览器中粘贴 ESPHome YAML 即可触发 Workflow 编译并下载固件，无需手动填写 Personal Access Token。
+Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：平台默认使用维护者提供的 GitHub Token 触发 Workflow，用户也可以通过 OAuth 授权切换到个人 Token，在浏览器中粘贴 ESPHome YAML 即可完成编译并下载固件，无需手动填写 Personal Access Token。
 
 ## 目录结构
 
@@ -37,6 +37,7 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户完成 GitHub
    - `FRONTEND_URL`（授权结束后的跳转地址，生产时建议写 Pages 域名）
    - `ALLOWED_ORIGINS`（逗号分隔的允许跨域来源；至少包含 Pages 域名，开发时可加 `http://localhost:5173`）
    - `GITHUB_REQUIRE_PRIVATE_REPO`（默认留空/false，仅在需要访问私有仓库时设为 `true` 以请求 `repo` scope）
+   - `GITHUB_SERVICE_TOKEN`（可选，平台默认使用的 Fine-grained PAT，建议仅勾选 `workflow` 与 `public_repo` 权限）
 
 > 注：Cloudflare Pages 会为 Production 和 Preview 分别保存变量，可使用不同的 OAuth App 区分环境。
 
@@ -59,9 +60,9 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户完成 GitHub
 
 ## 使用步骤
 
-1. 点击 “GitHub 登录” 跳转授权页，授予 `workflow` + `public_repo`（或 `repo`）权限。
+1. （可选）点击 “GitHub 登录” 跳转授权页，授予 `workflow` + `public_repo`（或 `repo`）权限；未登录时平台会使用 `GITHUB_SERVICE_TOKEN` 触发 Workflow。
 2. 回到页面后粘贴 ESPHome YAML。
-3. 提交后，前端将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`。
+3. 提交后，前端将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`（默认优先使用平台 Token，若失败会回退到已登录用户的 Token）。
 4. 前端轮询 Workflow 状态，完成后显示固件下载按钮。
 5. 需要切换账号时可点击 “退出登录” 清除会话。
 
@@ -80,6 +81,7 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户完成 GitHub
 - 切勿将真实密钥写入仓库；线上变量通过 Cloudflare 控制台配置，开发时使用 `.dev.vars`（已加入 `.gitignore`）。
 - 如需撤销授权，可在 GitHub → Settings → Applications 中移除对应 OAuth App。
 - 使用 `GITHUB_REQUIRE_PRIVATE_REPO=true` 时，授权范围会扩大到 `repo`，请确保仅在必要场景启用。
+- `GITHUB_SERVICE_TOKEN` 建议使用 Fine-grained PAT 并保存为 Pages Secret；GitHub 对单 Token 的 API 配额为每小时 5000 次，必要时可提示用户登录并切换为个人授权。
 
 ## 可选增强
 

@@ -9,3 +9,4 @@ GITHUB_WORKFLOW_REF=main
 FRONTEND_URL=https://esphome.idreamshen.com
 ALLOWED_ORIGINS=https://esphome.idreamshen.com
 GITHUB_REQUIRE_PRIVATE_REPO=false
+GITHUB_SERVICE_TOKEN=your_service_pat

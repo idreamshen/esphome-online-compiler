@@ -24,6 +24,7 @@ interface Env {
   FRONTEND_URL?: string;
   ALLOWED_ORIGINS?: string;
   GITHUB_REQUIRE_PRIVATE_REPO?: string;
+  GITHUB_SERVICE_TOKEN?: string;
 }
 
 type WorkflowRun = {
@@ -41,6 +42,29 @@ type WorkflowArtifact = {
   id: number;
   name: string;
   expired: boolean;
+};
+
+type TokenSource = 'service' | 'session';
+
+type TokenCandidate = {
+  source: TokenSource;
+  token: string;
+};
+
+type TokenStrategy = {
+  candidates: TokenCandidate[];
+  lastSuccessful?: TokenCandidate;
+};
+
+type GithubRequestResult = {
+  response: Response;
+  source: TokenSource | null;
+  attempted: TokenSource[];
+};
+
+type GithubErrorPayload = {
+  message: string;
+  serviceTokenDegraded?: boolean;
 };
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -229,8 +253,20 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
 
 async function handleSession(request: Request, env: Env): Promise<Response> {
   const token = await readSessionToken(request, env.SESSION_SECRET);
+  const serviceTokenAvailable = Boolean(env.GITHUB_SERVICE_TOKEN?.trim());
+  const repoInfo = {
+    owner: env.GITHUB_REPO_OWNER,
+    name: env.GITHUB_REPO_NAME,
+    workflowId: env.GITHUB_WORKFLOW_ID,
+    ref: env.GITHUB_WORKFLOW_REF ?? 'main'
+  };
   if (!token) {
-    return jsonResponse({ authenticated: false });
+    return jsonResponse({
+      authenticated: false,
+      serviceTokenAvailable,
+      defaultTokenSource: serviceTokenAvailable ? 'service' : 'session',
+      repo: repoInfo
+    });
   }
 
   const userResp = await githubRequest(token, 'https://api.github.com/user', {
@@ -238,12 +274,25 @@ async function handleSession(request: Request, env: Env): Promise<Response> {
   });
 
   if (userResp.status === 401) {
-    return jsonResponse({ authenticated: false });
+    return jsonResponse({
+      authenticated: false,
+      serviceTokenAvailable,
+      defaultTokenSource: serviceTokenAvailable ? 'service' : 'session',
+      repo: repoInfo
+    });
   }
 
   if (!userResp.ok) {
     console.error('Failed to fetch GitHub user', userResp.status, await userResp.text());
-    return jsonResponse({ authenticated: false }, userResp.status);
+    return jsonResponse(
+      {
+        authenticated: false,
+        serviceTokenAvailable,
+        defaultTokenSource: serviceTokenAvailable ? 'service' : 'session',
+        repo: repoInfo
+      },
+      userResp.status
+    );
   }
 
   const body = (await userResp.json()) as {
@@ -264,6 +313,8 @@ async function handleSession(request: Request, env: Env): Promise<Response> {
 
   return jsonResponse({
     authenticated: true,
+    serviceTokenAvailable,
+    defaultTokenSource: serviceTokenAvailable ? 'service' : 'session',
     user: {
       login: body.login,
       name: body.name ?? null,
@@ -272,25 +323,16 @@ async function handleSession(request: Request, env: Env): Promise<Response> {
     },
     tokenScopes,
     missingScopes,
-    repo: {
-      owner: env.GITHUB_REPO_OWNER,
-      name: env.GITHUB_REPO_NAME,
-      workflowId: env.GITHUB_WORKFLOW_ID,
-      ref: env.GITHUB_WORKFLOW_REF ?? 'main'
-    }
+    repo: repoInfo
   });
 }
 
 async function handleCompile(request: Request, env: Env): Promise<Response> {
-  const token = await readSessionToken(request, env.SESSION_SECRET);
-  if (!token) {
-    return jsonResponse({ message: '未登录或会话已失效' }, 401);
-  }
-
   let body: {
     encodedYaml?: string;
     deviceName?: string;
     board?: string;
+    useUserToken?: boolean;
   };
 
   try {
@@ -321,8 +363,21 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
     inputs.board = body.board;
   }
 
-  const dispatchResp = await githubRequest(
-    token,
+  const preferUserToken = body.useUserToken === true;
+  const strategy = await resolveTokenStrategy(request, env, preferUserToken ? 'session' : null);
+  if (strategy.candidates.length === 0) {
+    return jsonResponse(
+      {
+        message: preferUserToken
+          ? '尚未登录 GitHub，无法使用个人授权'
+          : '平台未配置可用的 GitHub 凭据，请登录 GitHub 后再试'
+      },
+      401
+    );
+  }
+
+  const dispatchResult = await githubRequestWithStrategy(
+    strategy,
     `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/workflows/${env.GITHUB_WORKFLOW_ID}/dispatches`,
     {
       method: 'POST',
@@ -333,17 +388,30 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
     }
   );
 
+  const dispatchResp = dispatchResult.response;
   if (!dispatchResp.ok) {
-    console.error('Failed to dispatch workflow', dispatchResp.status, await dispatchResp.text());
-    return jsonResponse({ message: '触发 GitHub Workflow 失败' }, dispatchResp.status);
+    const errorText = await dispatchResp.text();
+    console.error(
+      'Failed to dispatch workflow',
+      dispatchResp.status,
+      errorText || dispatchResp.statusText
+    );
+    const errorPayload = buildGithubErrorPayload(
+      dispatchResp.status,
+      dispatchResult.source,
+      dispatchResult.attempted,
+      strategy
+    );
+    return jsonResponse(errorPayload, dispatchResp.status);
   }
 
-  const matchedRun = await findRunByRequestId(token, env, requestId);
+  const matchedRun = await findRunByRequestId(strategy, env, requestId);
 
   return jsonResponse({
     requestId,
     runId: matchedRun?.id ?? null,
     htmlUrl: matchedRun?.html_url ?? null,
+    tokenSource: dispatchResult.source ?? null,
     message: matchedRun
       ? 'Workflow 已触发'
       : 'Workflow 正在初始化，请稍后查询状态'
@@ -351,52 +419,69 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleStatus(request: Request, env: Env, identifier: string): Promise<Response> {
-  const token = await readSessionToken(request, env.SESSION_SECRET);
-  if (!token) {
-    return jsonResponse({ message: '未登录或会话已失效' }, 401);
+  const preference = deriveTokenPreference(request);
+  const strategy = await resolveTokenStrategy(request, env, preference);
+  if (strategy.candidates.length === 0) {
+    return jsonResponse({ message: '缺少可用的 GitHub 凭据，请登录后重试' }, 401);
   }
 
   let run: WorkflowRun | null = null;
   if (/^\d+$/.test(identifier)) {
-    const runResp = await githubRequest(
-      token,
+    const runResult = await githubRequestWithStrategy(
+      strategy,
       `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/runs/${identifier}`,
       { method: 'GET' }
     );
+    const runResp = runResult.response;
+    const runText = await runResp.text();
 
     if (runResp.status === 404) {
       return jsonResponse({ message: '未找到对应的 Workflow 运行' }, 404);
     }
 
     if (!runResp.ok) {
-      console.error('Failed to fetch workflow run', runResp.status, await runResp.text());
-      return jsonResponse({ message: '获取 Workflow 状态失败' }, runResp.status);
+      console.error('Failed to fetch workflow run', runResp.status, runText || runResp.statusText);
+    const errorPayload = buildGithubErrorPayload(
+      runResp.status,
+      runResult.source,
+      runResult.attempted,
+      strategy
+    );
+    return jsonResponse(errorPayload, runResp.status);
     }
 
-    run = (await runResp.json()) as WorkflowRun;
+    run = JSON.parse(runText) as WorkflowRun;
   } else {
-    run = await findRunByRequestId(token, env, identifier);
+    run = await findRunByRequestId(strategy, env, identifier);
     if (!run) {
       return jsonResponse({ message: '未找到对应的 Workflow 运行' }, 404);
     }
   }
 
-  const artifactsResp = await githubRequest(
-    token,
+  const artifactsResult = await githubRequestWithStrategy(
+    strategy,
     `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/runs/${run.id}/artifacts`,
     { method: 'GET' }
   );
+  const artifactsResp = artifactsResult.response;
+  const artifactsText = await artifactsResp.text();
 
   if (!artifactsResp.ok) {
     console.error(
       'Failed to fetch workflow artifacts',
       artifactsResp.status,
-      await artifactsResp.text()
+      artifactsText || artifactsResp.statusText
     );
-    return jsonResponse({ message: '获取 Workflow 产物失败' }, artifactsResp.status);
+    const errorPayload = buildGithubErrorPayload(
+      artifactsResp.status,
+      artifactsResult.source,
+      artifactsResult.attempted,
+      strategy
+    );
+    return jsonResponse(errorPayload, artifactsResp.status);
   }
 
-  const artifactsJson = (await artifactsResp.json()) as { artifacts: WorkflowArtifact[] };
+  const artifactsJson = JSON.parse(artifactsText) as { artifacts: WorkflowArtifact[] };
   const validArtifact = artifactsJson.artifacts.find((item) => !item.expired) ?? null;
 
   return jsonResponse({
@@ -421,13 +506,14 @@ async function handleArtifact(
   runId: number,
   artifactId: number
 ): Promise<Response> {
-  const token = await readSessionToken(request, env.SESSION_SECRET);
-  if (!token) {
-    return jsonResponse({ message: '未登录或会话已失效' }, 401);
+  const preference = deriveTokenPreference(request);
+  const strategy = await resolveTokenStrategy(request, env, preference);
+  if (strategy.candidates.length === 0) {
+    return jsonResponse({ message: '缺少可用的 GitHub 凭据，请登录后重试' }, 401);
   }
 
-  let artifactResp = await githubRequest(
-    token,
+  const artifactResult = await githubRequestWithStrategy(
+    strategy,
     `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/artifacts/${artifactId}/zip`,
     {
       method: 'GET',
@@ -437,6 +523,7 @@ async function handleArtifact(
       }
     }
   );
+  let artifactResp = artifactResult.response;
 
   if (artifactResp.status >= 300 && artifactResp.status < 400) {
     const location = artifactResp.headers.get('Location');
@@ -461,8 +548,22 @@ async function handleArtifact(
   }
 
   if (!artifactResp.ok) {
-    console.error('Failed to download artifact', artifactResp.status, await artifactResp.text());
-    return jsonResponse({ message: '下载产物失败' }, artifactResp.status);
+    const errorText = await artifactResp.text();
+    console.error('Failed to download artifact', artifactResp.status, errorText || artifactResp.statusText);
+    const isGitHubResponse = artifactResp === artifactResult.response;
+    return jsonResponse(
+      {
+        ...(isGitHubResponse
+          ? buildGithubErrorPayload(
+              artifactResp.status,
+              artifactResult.source,
+              artifactResult.attempted,
+              strategy
+            )
+          : { message: '下载产物失败' })
+      },
+      artifactResp.status
+    );
   }
 
   const headers = new Headers(artifactResp.headers);
@@ -478,22 +579,28 @@ async function handleArtifact(
   });
 }
 
-async function findRunByRequestId(token: string, env: Env, requestId: string) {
+async function findRunByRequestId(strategy: TokenStrategy, env: Env, requestId: string) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const runsResp = await githubRequest(
-      token,
+    const runsResult = await githubRequestWithStrategy(
+      strategy,
       `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/workflows/${env.GITHUB_WORKFLOW_ID}/runs?event=workflow_dispatch&per_page=25`,
       {
         method: 'GET'
       }
     );
+    const runsResp = runsResult.response;
+    const runsText = await runsResp.text();
 
     if (!runsResp.ok) {
-      console.error('Failed to list workflow runs', runsResp.status, await runsResp.text());
+      console.error(
+        'Failed to list workflow runs',
+        runsResp.status,
+        runsText || runsResp.statusText
+      );
       return null;
     }
 
-    const runsJson = (await runsResp.json()) as { workflow_runs: WorkflowRun[] };
+    const runsJson = JSON.parse(runsText) as { workflow_runs: WorkflowRun[] };
     const matched = runsJson.workflow_runs.find((run) => run.name?.includes(requestId));
     if (matched) {
       return matched;
@@ -502,6 +609,220 @@ async function findRunByRequestId(token: string, env: Env, requestId: string) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
   return null;
+}
+
+function deriveTokenPreference(request: Request): TokenSource | null {
+  const headerPref = parseTokenSourceValue(request.headers.get('X-GitHub-Token-Source'));
+  if (headerPref) {
+    return headerPref;
+  }
+
+  try {
+    const url = new URL(request.url);
+    return parseTokenSourceValue(url.searchParams.get('token_source'));
+  } catch (error) {
+    console.warn('Failed to parse token preference from URL', error);
+    return null;
+  }
+}
+
+function parseTokenSourceValue(value: string | null): TokenSource | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.toLowerCase();
+  if (normalized === 'service' || normalized === 'session') {
+    return normalized as TokenSource;
+  }
+  return null;
+}
+
+async function resolveTokenStrategy(
+  request: Request,
+  env: Env,
+  override: TokenSource | null
+): Promise<TokenStrategy> {
+  const serviceToken =
+    typeof env.GITHUB_SERVICE_TOKEN === 'string' && env.GITHUB_SERVICE_TOKEN.trim().length > 0
+      ? env.GITHUB_SERVICE_TOKEN.trim()
+      : null;
+  const sessionToken = await readSessionToken(request, env.SESSION_SECRET);
+  const preference = override ?? deriveTokenPreference(request);
+
+  const order: TokenSource[] = [];
+  const pushUnique = (source: TokenSource) => {
+    if (!order.includes(source)) {
+      order.push(source);
+    }
+  };
+
+  if (preference) {
+    pushUnique(preference);
+    pushUnique(preference === 'service' ? 'session' : 'service');
+  } else {
+    pushUnique('service');
+    pushUnique('session');
+  }
+
+  const candidates: TokenCandidate[] = [];
+  for (const source of order) {
+    if (source === 'service' && serviceToken) {
+      candidates.push({ source, token: serviceToken });
+    } else if (source === 'session' && sessionToken) {
+      candidates.push({ source, token: sessionToken });
+    }
+  }
+
+  return { candidates };
+}
+
+async function githubRequestWithStrategy(
+  strategy: TokenStrategy,
+  url: string,
+  init: RequestInit
+): Promise<GithubRequestResult> {
+  if (strategy.candidates.length === 0) {
+    throw new Error('No GitHub tokens available for request');
+  }
+
+  const attempted: TokenSource[] = [];
+  const tried = new Set<TokenSource>();
+  const orderedCandidates = strategy.lastSuccessful
+    ? [
+        strategy.lastSuccessful,
+        ...strategy.candidates.filter((candidate) => candidate !== strategy.lastSuccessful)
+      ]
+    : strategy.candidates;
+
+  let response: Response | null = null;
+  let source: TokenSource | null = null;
+
+  for (const candidate of orderedCandidates) {
+    if (tried.has(candidate.source)) {
+      continue;
+    }
+    tried.add(candidate.source);
+    attempted.push(candidate.source);
+
+    response = await githubRequest(candidate.token, url, init);
+    source = candidate.source;
+
+    if (shouldRetryWithFallback(response) && tried.size < strategy.candidates.length) {
+      response.body?.cancel();
+      response = null;
+      source = null;
+      continue;
+    }
+
+    strategy.lastSuccessful = candidate;
+    break;
+  }
+
+  if (!response) {
+    throw new Error('Failed to execute GitHub request with available tokens');
+  }
+
+  return {
+    response,
+    source,
+    attempted
+  };
+}
+
+function shouldRetryWithFallback(response: Response): boolean {
+  return response.status === 401 || response.status === 403 || response.status === 429;
+}
+
+function hasCandidate(strategy: TokenStrategy, source: TokenSource): boolean {
+  return strategy.candidates.some((candidate) => candidate.source === source);
+}
+
+function hasAttemptedSource(attempted: TokenSource[], source: TokenSource): boolean {
+  return attempted.includes(source);
+}
+
+function buildGithubErrorPayload(
+  status: number,
+  source: TokenSource | null,
+  attempted: TokenSource[],
+  strategy: TokenStrategy
+): GithubErrorPayload {
+  const hasService = hasCandidate(strategy, 'service');
+  const hasSession = hasCandidate(strategy, 'session');
+  const attemptedSession = hasAttemptedSource(attempted, 'session');
+  const payload: GithubErrorPayload = {
+    message: '触发 GitHub Workflow 失败'
+  };
+
+  const markServiceDegraded = () => {
+    payload.serviceTokenDegraded = true;
+  };
+
+  if (status === 401) {
+    if (source === 'session') {
+      payload.message = 'GitHub 授权已失效，请退出后重新登录';
+      return payload;
+    }
+    if (source === 'service') {
+      markServiceDegraded();
+      payload.message = hasSession
+        ? 'GitHub 身份验证失败，请使用个人授权后再试'
+        : 'GitHub 身份验证失败，请登录后再试';
+      return payload;
+    }
+    payload.message = 'GitHub 身份验证失败，请稍后重试';
+    return payload;
+  }
+
+  if (status === 403 || status === 429) {
+    if (source === 'session') {
+      payload.message = '当前授权缺少必要权限，请退出后重新授权并勾选 workflow/public_repo 权限';
+      return payload;
+    }
+    if (source === 'service') {
+      markServiceDegraded();
+      if (!hasSession) {
+        payload.message = 'GitHub 拒绝了请求，请登录后使用个人授权再试';
+        return payload;
+      }
+      if (!attemptedSession) {
+        payload.message = 'GitHub 拒绝了请求，正在尝试使用个人授权，请稍候重试';
+        return payload;
+      }
+      payload.message = 'GitHub 拒绝了请求，请稍后再试或检查权限';
+      return payload;
+    }
+    payload.message = 'GitHub 拒绝了请求，请稍后再试';
+    return payload;
+  }
+
+  if (status === 404) {
+    payload.message = 'GitHub 上未找到相关资源，请检查 Workflow 配置';
+    return payload;
+  }
+
+  if (status === 422) {
+    payload.message = 'GitHub 拒绝了请求参数，请检查 YAML 或 Workflow 输入';
+    return payload;
+  }
+
+  if (status >= 500) {
+    payload.message = 'GitHub 服务暂时不可用，请稍后重试';
+    return payload;
+  }
+
+  if (source === 'session' && hasService && !hasAttemptedSource(attempted, 'service')) {
+    payload.message = '个人授权不可用，请重试或改用平台默认凭据';
+    return payload;
+  }
+
+  if (source === 'service' && hasSession && !hasAttemptedSource(attempted, 'session')) {
+    markServiceDegraded();
+    payload.message = '当前请求未能使用平台凭据完成，请尝试使用个人授权';
+    return payload;
+  }
+
+  return payload;
 }
 
 async function githubRequest(token: string, url: string, init: RequestInit): Promise<Response> {
