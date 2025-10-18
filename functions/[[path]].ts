@@ -426,13 +426,39 @@ async function handleArtifact(
     return jsonResponse({ message: '未登录或会话已失效' }, 401);
   }
 
-  const artifactResp = await githubRequest(
+  let artifactResp = await githubRequest(
     token,
     `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/artifacts/${artifactId}/zip`,
     {
-      method: 'GET'
+      method: 'GET',
+      redirect: 'manual',
+      headers: {
+        Accept: 'application/octet-stream'
+      }
     }
   );
+
+  if (artifactResp.status >= 300 && artifactResp.status < 400) {
+    const location = artifactResp.headers.get('Location');
+    if (!location) {
+      console.error('Artifact redirect missing location');
+      return jsonResponse({ message: '下载产物失败' }, 502);
+    }
+
+    const followResp = await fetch(location, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'esphome-online-compiler/1.0'
+      }
+    });
+
+    if (!followResp.ok) {
+      console.error('Failed to follow artifact redirect', followResp.status, await followResp.text());
+      return jsonResponse({ message: '下载产物失败' }, followResp.status);
+    }
+
+    artifactResp = followResp;
+  }
 
   if (!artifactResp.ok) {
     console.error('Failed to download artifact', artifactResp.status, await artifactResp.text());
@@ -480,10 +506,14 @@ async function findRunByRequestId(token: string, env: Env, requestId: string) {
 
 async function githubRequest(token: string, url: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers ?? {});
-  headers.set('Accept', 'application/vnd.github+json');
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/vnd.github+json');
+  }
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-GitHub-Api-Version', '2022-11-28');
-  headers.set('User-Agent', 'esphome-online-compiler/1.0');
+  if (!headers.has('User-Agent')) {
+    headers.set('User-Agent', 'esphome-online-compiler/1.0');
+  }
 
   return fetch(url, {
     ...init,
