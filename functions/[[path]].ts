@@ -52,8 +52,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
+  const isAuthPath =
+    path === '/auth/login' ||
+    path === '/auth/logout' ||
+    path === '/auth/callback';
+  const isApiPath = path === '/api' || path === '/api/session' || path.startsWith('/api/');
 
   try {
+    if (!isAuthPath && !isApiPath) {
+      return context.next();
+    }
+
     if (request.method === 'GET' && path === '/auth/login') {
       return buildCorsResponse(request, env, await handleLogin(request, env));
     }
@@ -93,14 +102,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         request,
         env,
         await handleArtifact(request, env, Number(runId), Number(artifactId))
-      );
-    }
-
-    if (request.method === 'GET' && path === '/') {
-      return buildCorsResponse(
-        request,
-        env,
-        jsonResponse({ service: 'esphome-online-compiler-pages', ok: true })
       );
     }
 
