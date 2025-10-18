@@ -86,11 +86,6 @@
             {{ downloadingArtifact ? '下载中...' : `下载 ${artifact.name}.zip` }}
           </button>
         </p>
-        <p v-if="lastTokenSource" class="status info">
-          <strong>凭据来源：</strong>
-          <span>{{ lastTokenSource === 'service' ? '平台 GitHub 授权' : '个人 GitHub 授权' }}</span>
-        </p>
-        <p v-if="statusMessage" class="status info">{{ statusMessage }}</p>
       </section>
     </template>
   </section>
@@ -201,7 +196,7 @@ const canSubmit = computed(() => {
   return canUsePersonalToken.value;
 });
 const submitHint = computed(() => {
-  if (canSubmit.value) {
+  if (canSubmit.value || serviceTokenDegraded.value) {
     return null;
   }
   if (!isAuthenticated.value) {
@@ -231,8 +226,6 @@ const statusClass = computed(() => {
   }
   return 'progress';
 });
-
-const statusMessage = computed(() => status.message || '');
 
 function applyServiceTokenDegraded(payload: ApiErrorPayload | undefined) {
   if (payload?.serviceTokenDegraded) {
@@ -411,8 +404,8 @@ async function handleSubmit() {
       ? (err.response?.data as ApiErrorPayload | undefined)
       : undefined;
     const message = payload?.message ?? '触发编译失败，请稍后再试';
-    error.value = message;
     applyServiceTokenDegraded(payload);
+    error.value = payload?.serviceTokenDegraded ? null : message;
   } finally {
     pending.value = false;
   }
@@ -429,8 +422,8 @@ function startPolling() {
         ? (err.response?.data as ApiErrorPayload | undefined)
         : undefined;
       const message = payload?.message ?? '获取状态失败';
-      error.value = message;
       applyServiceTokenDegraded(payload);
+      error.value = payload?.serviceTokenDegraded ? null : message;
       clearPolling();
     }
   }, 10_000);
@@ -502,8 +495,8 @@ async function downloadArtifact() {
       ? (err.response?.data as ApiErrorPayload | undefined)
       : undefined;
     const message = payload?.message ?? '下载固件失败，请检查权限或稍后重试';
-    error.value = message;
     applyServiceTokenDegraded(payload);
+    error.value = payload?.serviceTokenDegraded ? null : message;
   } finally {
     downloadingArtifact.value = false;
   }
@@ -873,6 +866,10 @@ button.loading::after {
 
 .status.warning {
   color: #fef08a;
+}
+
+.status-card .status + .status {
+  margin-top: 0.35rem;
 }
 
 .status-card {
