@@ -69,7 +69,10 @@
         <p v-if="runId"><strong>Workflow Run ID：</strong> {{ runId }}</p>
         <p>
           <strong>当前状态：</strong>
-          <span :class="['badge', statusClass]">{{ displayStatus }}</span>
+          <span :class="['badge', statusClass]">
+            <span v-if="isStatusLoading" class="badge-spinner" aria-hidden="true"></span>
+            {{ displayStatus }}
+          </span>
         </p>
         <p v-if="runUrl">
           <strong>GitHub Workflow：</strong>
@@ -226,6 +229,10 @@ const statusClass = computed(() => {
   }
   return 'progress';
 });
+
+const isStatusLoading = computed(
+  () => status.status === 'queued' || status.status === 'in_progress'
+);
 
 function applyServiceTokenDegraded(payload: ApiErrorPayload | undefined) {
   if (payload?.serviceTokenDegraded) {
@@ -884,12 +891,24 @@ button.loading::after {
 }
 
 .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   font-size: 0.75rem;
+}
+
+.badge-spinner {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.9s linear infinite;
 }
 
 .badge.default {
