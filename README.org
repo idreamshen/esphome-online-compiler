@@ -54,7 +54,7 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户通过 GitHub
 
 * 使用流程
   1. 点击「GitHub 登录」进入官方授权页，同意 `repo` 与 `workflow` 权限；
-  2. 回到页面后填写 ESPHome YAML，可选输入设备名称、板子类型；
+  2. 回到页面后填写 ESPHome YAML；
   3. 提交后系统会将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`；
   4. 前端定时轮询 Workflow 状态，完成后显示可下载的固件产物；
   5. 如需切换账户或重新授权，使用「退出登录」按钮清除会话。

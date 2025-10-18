@@ -51,17 +51,6 @@
           />
         </label>
 
-        <div class="settings">
-          <label class="field">
-            <span>设备标识（可选）</span>
-            <input v-model="deviceName" placeholder="mydevice" maxlength="40" />
-          </label>
-          <label class="field">
-            <span>板子类型（可选）</span>
-            <input v-model="board" placeholder="esp32dev" maxlength="40" />
-          </label>
-        </div>
-
         <div class="actions">
           <button :disabled="pending || missingScopes.length > 0" type="submit">
             {{ pending ? '正在提交...' : '提交编译' }}
@@ -149,8 +138,6 @@ const session = ref<SessionPayload | null>(null);
 const sessionLoaded = ref(false);
 
 const yaml = ref('');
-const deviceName = ref('');
-const board = ref('');
 const runId = ref<number | null>(null);
 const requestId = ref<string | null>(null);
 const runUrl = ref<string | null>(null);
@@ -240,9 +227,7 @@ async function handleSubmit() {
 
   try {
     const payload = {
-      encodedYaml: Base64.encode(yaml.value),
-      deviceName: deviceName.value || undefined,
-      board: board.value || undefined
+      encodedYaml: Base64.encode(yaml.value)
     };
 
     const { data } = await client.post<{
@@ -354,8 +339,6 @@ function clearPolling() {
 
 function reset() {
   yaml.value = '';
-  deviceName.value = '';
-  board.value = '';
   runId.value = null;
   requestId.value = null;
   runUrl.value = null;
@@ -459,12 +442,6 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   font-size: 0.95rem;
   color: #e2e8f0;
-}
-
-.settings {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 textarea {
