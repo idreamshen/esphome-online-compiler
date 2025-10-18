@@ -7,4 +7,5 @@ backend/dist/
 *.log
 .DS_Store
 .dev.vars
+.dev.vars.*
 .wrangler/

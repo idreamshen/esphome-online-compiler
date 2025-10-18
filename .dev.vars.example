@@ -8,3 +8,4 @@ GITHUB_WORKFLOW_ID=esphome-compile.yml
 GITHUB_WORKFLOW_REF=main
 FRONTEND_URL=http://localhost:5173
 ALLOWED_ORIGINS=http://localhost:5173
+GITHUB_REQUIRE_PRIVATE_REPO=false

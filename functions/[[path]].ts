@@ -2,8 +2,6 @@ const SESSION_COOKIE = 'esphome_session';
 const STATE_COOKIE = 'esphome_oauth_state';
 const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
 const STATE_MAX_AGE = 600; // 10 minutes
-const REQUIRED_SCOPES = ['repo', 'workflow'];
-
 type PagesContext<Env> = {
   request: Request;
   env: Env;
@@ -25,6 +23,7 @@ interface Env {
   GITHUB_WORKFLOW_REF?: string;
   FRONTEND_URL?: string;
   ALLOWED_ORIGINS?: string;
+  GITHUB_REQUIRE_PRIVATE_REPO?: string;
 }
 
 type WorkflowRun = {
@@ -119,10 +118,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 async function handleLogin(env: Env): Promise<Response> {
   const state = crypto.randomUUID();
   const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
+  const scopes = getRequiredScopes(env);
   authorizeUrl.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
   authorizeUrl.searchParams.set('redirect_uri', env.GITHUB_OAUTH_REDIRECT_URI);
   authorizeUrl.searchParams.set('state', state);
-  authorizeUrl.searchParams.set('scope', REQUIRED_SCOPES.join(' '));
+  authorizeUrl.searchParams.set('scope', scopes.join(' '));
   authorizeUrl.searchParams.set('allow_signup', 'false');
 
   const headers = new Headers();
@@ -255,7 +255,8 @@ async function handleSession(request: Request, env: Env): Promise<Response> {
     .map((scope) => scope.trim())
     .filter(Boolean);
 
-  const missingScopes = REQUIRED_SCOPES.filter((scope) => !tokenScopes.includes(scope));
+  const requiredScopes = getRequiredScopes(env);
+  const missingScopes = requiredScopes.filter((scope) => !tokenScopes.includes(scope));
 
   return jsonResponse({
     authenticated: true,
@@ -650,4 +651,11 @@ function buildCorsResponse(request: Request, env: Env, response: Response): Resp
     statusText: response.statusText,
     headers
   });
+}
+
+function getRequiredScopes(env: Env): string[] {
+  const requirePrivate =
+    typeof env.GITHUB_REQUIRE_PRIVATE_REPO === 'string' &&
+    env.GITHUB_REQUIRE_PRIVATE_REPO.toLowerCase() === 'true';
+  return requirePrivate ? ['repo', 'workflow'] : ['public_repo', 'workflow'];
 }
