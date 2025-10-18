@@ -433,7 +433,7 @@ async function handleArtifact(
       method: 'GET',
       redirect: 'manual',
       headers: {
-        Accept: 'application/octet-stream'
+        Accept: 'application/vnd.github+json'
       }
     }
   );
