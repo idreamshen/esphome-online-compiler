@@ -68,13 +68,37 @@ jobs:
           esphome version
           esphome compile "${{ steps.decode.outputs.config-path }}"
 
+      - name: Prepare firmware bundle
+        run: |
+          set -eo pipefail
+          mkdir -p artifact
+          cp "${{ steps.decode.outputs.config-path }}" artifact/
+
+          mapfile -t firmware_files < <(find .esphome/build -type f -name '*.bin')
+
+          if [[ ${#firmware_files[@]} -eq 0 ]]; then
+            echo "未找到固件 (*.bin) 文件，检查 ESPHome 编译输出" >&2
+            exit 1
+          fi
+
+          for file in "${firmware_files[@]}"; do
+            base="$(basename "$file")"
+            cp "$file" "artifact/$base"
+          done
+
+          mapfile -t manifest_files < <(find .esphome/build -type f -name '*.manifest.json')
+          for file in "${manifest_files[@]}"; do
+            base="$(basename "$file")"
+            cp "$file" "artifact/$base"
+          done
+
+          ls -al artifact
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ env.REQUEST_ID }}
-          path: |
-            .esphome/build
-            config.yaml
+          path: artifact
           retention-days: 14
           if-no-files-found: error
 
@@ -87,7 +111,7 @@ jobs:
           - 请求 ID：${{ env.REQUEST_ID }}
           - 设备：${{ env.DEVICE_NAME || '未设置' }}
           - 板子：${{ env.BOARD_NAME || '未设置' }}
-          - 构建目录：`.esphome/build`
+          - 产物目录：`artifact/`
 
-          下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`。
+          下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`（内含 config.yaml 与 *.bin 固件）。
           EOF

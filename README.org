@@ -62,7 +62,7 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户通过 GitHub
 * GitHub Actions Workflow
   - 解码 YAML 到 `config.yaml`；
   - 安装最新 ESPHome，执行 `esphome compile config.yaml`；
-  - 上传 `.esphome/build` 与 `config.yaml` 为 `firmware-<request_id>` Artifact（保留 14 天）；
+  - 将所有生成的固件 `*.bin`（及对应 manifest）与原始 `config.yaml` 打包到 `artifact/`，上传为 `firmware-<request_id>` Artifact（保留 14 天）；
   - 运行名称包含 `request_id`，Pages Functions 根据该字段匹配 Workflow Run。
 
 * 安全注意
