@@ -56,6 +56,34 @@
         </section>
 
         <label class="field">
+          <span>ESPHome 版本</span>
+          <select v-model="esphomeVersionSelection" :disabled="pending">
+            <option
+              v-for="option in ESPHOME_VERSION_OPTIONS"
+              :key="option.value || 'latest'"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+          <input
+            v-if="esphomeVersionSelection === '__custom__'"
+            v-model="customEsphomeVersion"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            :disabled="pending"
+            placeholder="例如 2025.10.1"
+          />
+          <p class="field-hint">
+            留空则自动使用最新稳定版，可输入具体版本号编译历史版本。
+          </p>
+        </label>
+
+        <label class="field">
           <span>压缩包密码</span>
           <div class="password-input">
             <input
@@ -143,6 +171,10 @@
           <button class="link-button" type="button" @click="openRunUrl">打开</button>
         </p>
         <p>
+          <strong>ESPHome 版本：</strong>
+          {{ esphomeVersionLabel }}
+        </p>
+        <p>
           <strong>解压密码：</strong>
           <span class="password-display">{{ artifactPassword }}</span>
         </p>
@@ -209,6 +241,7 @@ type PersistedJobState = {
   artifactUrl: string | null;
   artifactPassword?: string | null;
   tokenSource: TokenSource | null;
+  esphomeVersion?: string | null;
 };
 
 type ApiErrorPayload = {
@@ -220,6 +253,15 @@ const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
 const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
 const STORAGE_PASSWORD_KEY = 'esphome-online-compiler:artifact-password';
 const STORAGE_SECRETS_KEY = 'esphome-online-compiler:secret-values';
+const STORAGE_VERSION_KEY = 'esphome-online-compiler:esphome-version';
+
+const ESPHOME_VERSION_OPTIONS = [
+  { value: '', label: '最新稳定版（自动）' },
+  { value: '2025.10.1', label: '2025.10.1' },
+  { value: '2025.9.0', label: '2025.9.0' },
+  { value: '2025.8.3', label: '2025.8.3' },
+  { value: '__custom__', label: '自定义...' }
+] as const;
 
 const client = axios.create({
   withCredentials: true
@@ -246,6 +288,21 @@ const authLoading = ref(false);
 const secretNames = ref<string[]>([]);
 const secretValues = reactive<Record<string, string>>({});
 const revealedSecrets = reactive<Record<string, boolean>>({});
+const customEsphomeVersion = ref('');
+const selectedEsphomeVersion = ref('');
+const esphomeVersionSelection = ref<string>(ESPHOME_VERSION_OPTIONS[0].value);
+const esphomeVersionLabel = computed(() => {
+  if (!selectedEsphomeVersion.value) {
+    return '最新稳定版';
+  }
+  const match = ESPHOME_VERSION_OPTIONS.find(
+    (option) => option.value === selectedEsphomeVersion.value
+  );
+  if (match && match.value !== '__custom__') {
+    return match.label;
+  }
+  return selectedEsphomeVersion.value;
+});
 
 const status = reactive<WorkflowStatus>({
   status: '',
@@ -389,6 +446,43 @@ function restorePassword() {
   }
   artifactPassword.value = generateRandomPassword();
   persistPassword(artifactPassword.value);
+}
+
+function persistEsphomeVersion(value: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    if (value) {
+      window.localStorage.setItem(STORAGE_VERSION_KEY, value);
+    } else {
+      window.localStorage.removeItem(STORAGE_VERSION_KEY);
+    }
+  } catch (err) {
+    console.warn('保存 ESPHome 版本失败', err);
+  }
+}
+
+function restoreEsphomeVersion() {
+  if (typeof window === 'undefined') {
+    selectedEsphomeVersion.value = '';
+    customEsphomeVersion.value = '';
+    return;
+  }
+  try {
+    const stored = window.localStorage.getItem(STORAGE_VERSION_KEY);
+    if (stored) {
+      selectedEsphomeVersion.value = stored;
+      if (!ESPHOME_VERSION_OPTIONS.some((option) => option.value === stored)) {
+        customEsphomeVersion.value = stored;
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn('恢复 ESPHome 版本失败', err);
+  }
+  selectedEsphomeVersion.value = '';
+  customEsphomeVersion.value = '';
 }
 
 function regenerateArtifactPassword() {
@@ -567,6 +661,7 @@ onMounted(() => {
   restoreDraft();
   updateSecretPlaceholders(yaml.value);
   restorePassword();
+  restoreEsphomeVersion();
   loadSession();
 });
 
@@ -590,6 +685,54 @@ watch(artifactPassword, (value) => {
   persistPassword(value);
   if (requestId.value) {
     persistJobState();
+  }
+});
+
+let syncingEsphomeVersion = false;
+
+watch(esphomeVersionSelection, (value) => {
+  if (syncingEsphomeVersion) {
+    return;
+  }
+  syncingEsphomeVersion = true;
+  if (value === '__custom__') {
+    selectedEsphomeVersion.value = customEsphomeVersion.value.trim();
+  } else {
+    selectedEsphomeVersion.value = value;
+  }
+  syncingEsphomeVersion = false;
+});
+
+watch(selectedEsphomeVersion, (value) => {
+  persistEsphomeVersion(value);
+  if (!syncingEsphomeVersion) {
+    syncingEsphomeVersion = true;
+    const match = ESPHOME_VERSION_OPTIONS.find((option) => option.value === value);
+    if (match) {
+      esphomeVersionSelection.value = match.value;
+      if (match.value !== '__custom__') {
+        customEsphomeVersion.value = '';
+      }
+    } else if (value) {
+      customEsphomeVersion.value = value;
+      esphomeVersionSelection.value = '__custom__';
+    } else {
+      customEsphomeVersion.value = '';
+      esphomeVersionSelection.value = '';
+    }
+    syncingEsphomeVersion = false;
+  }
+  if (requestId.value) {
+    persistJobState();
+  }
+});
+
+watch(customEsphomeVersion, (value) => {
+  if (esphomeVersionSelection.value === '__custom__') {
+    const trimmed = value.trim();
+    if (trimmed !== selectedEsphomeVersion.value) {
+      selectedEsphomeVersion.value = trimmed;
+    }
   }
 });
 
@@ -718,10 +861,16 @@ async function handleSubmit() {
       encodedYaml: string;
       artifactPassword: string;
       useUserToken?: boolean;
+      esphomeVersion?: string;
     } = {
       encodedYaml: Base64.encode(yamlForCompile),
       artifactPassword: normalizedPassword
     };
+
+    const versionToUse = selectedEsphomeVersion.value.trim();
+    if (versionToUse) {
+      payload.esphomeVersion = versionToUse;
+    }
 
     if (wantsPersonalToken && canUsePersonalToken.value) {
       payload.useUserToken = true;
@@ -942,6 +1091,18 @@ function restoreJobState() {
     if (saved.artifactPassword) {
       artifactPassword.value = saved.artifactPassword;
     }
+    if (Object.prototype.hasOwnProperty.call(saved, 'esphomeVersion')) {
+      const savedVersion = saved.esphomeVersion ?? '';
+      selectedEsphomeVersion.value = savedVersion;
+      if (
+        savedVersion &&
+        !ESPHOME_VERSION_OPTIONS.some((option) => option.value === savedVersion)
+      ) {
+        customEsphomeVersion.value = savedVersion;
+      } else if (!savedVersion) {
+        customEsphomeVersion.value = '';
+      }
+    }
 
     pending.value = false;
     downloadingArtifact.value = false;
@@ -980,7 +1141,8 @@ function persistJobState() {
     artifact: artifact.value ? { ...artifact.value } : null,
     artifactUrl: artifactUrl.value,
     artifactPassword: artifactPassword.value || null,
-    tokenSource: lastTokenSource.value ?? null
+    tokenSource: lastTokenSource.value ?? null,
+    esphomeVersion: selectedEsphomeVersion.value ? selectedEsphomeVersion.value : null
   };
 
   try {
@@ -1128,6 +1290,21 @@ input:not([type='checkbox']) {
 }
 
 input:not([type='checkbox']):focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
+select {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0 0.75rem;
+  color: #f8fafc;
+}
+
+select:focus {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);

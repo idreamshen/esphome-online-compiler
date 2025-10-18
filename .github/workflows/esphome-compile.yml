@@ -23,6 +23,10 @@ on:
         description: 下载固件压缩包所需的密码
         required: true
         type: string
+      esphome_version:
+        description: 需要安装的 ESPHome 版本（例如 2025.10.1），留空则使用最新版本
+        required: false
+        type: string
 
 run-name: >-
   ESPHome compile (${{ inputs.device_name || inputs.board || 'request' }}) • ${{ inputs.request_id }}
@@ -69,8 +73,16 @@ jobs:
 
       - name: Install ESPHome
         run: |
+          set -eo pipefail
           python3 -m pip install --upgrade pip
-          pip3 install esphome
+          version="$(jq -r '.inputs.esphome_version // ""' "$GITHUB_EVENT_PATH")"
+          if [[ -n "$version" ]]; then
+            echo "Installing ESPHome version $version"
+            pip3 install "esphome==$version"
+          else
+            echo "Installing latest ESPHome"
+            pip3 install esphome
+          fi
 
       - name: Compile firmware
         id: compile
@@ -140,6 +152,7 @@ jobs:
           - 请求 ID：${{ env.REQUEST_ID }}
           - 设备：${{ env.DEVICE_NAME || '未设置' }}
           - 板子：${{ env.BOARD_NAME || '未设置' }}
+          - ESPHome：${{ inputs.esphome_version || '最新' }}
           - 压缩包：`artifact/firmware-${{ env.REQUEST_ID }}.zip`（下载后需使用页面展示的密码解压）
 
           下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`。

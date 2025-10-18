@@ -334,6 +334,7 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
     board?: string;
     useUserToken?: boolean;
     artifactPassword?: string;
+    esphomeVersion?: string;
   };
 
   try {
@@ -368,6 +369,17 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ message: '压缩包密码仅支持字母与数字' }, 400);
   }
 
+  const esphomeVersion =
+    typeof body.esphomeVersion === 'string' ? body.esphomeVersion.trim() : '';
+  if (esphomeVersion) {
+    if (esphomeVersion.length > 64) {
+      return jsonResponse({ message: 'ESPHome 版本号过长，请检查输入' }, 400);
+    }
+    if (!/^[0-9A-Za-z.+_-]+$/.test(esphomeVersion)) {
+      return jsonResponse({ message: 'ESPHome 版本仅支持字母、数字和 . + _ - 符号' }, 400);
+    }
+  }
+
   const inputs: Record<string, string> = {
     encoded_yaml: encodedYaml,
     request_id: requestId,
@@ -378,6 +390,9 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
   }
   if (body.board) {
     inputs.board = body.board;
+  }
+  if (esphomeVersion) {
+    inputs.esphome_version = esphomeVersion;
   }
 
   const preferUserToken = body.useUserToken === true;
