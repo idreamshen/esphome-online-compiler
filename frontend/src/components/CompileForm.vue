@@ -5,34 +5,11 @@
     </section>
 
     <template v-else>
-      <section v-if="isAuthenticated" class="user-card">
-        <div class="user-meta">
-          <img v-if="user?.avatarUrl" :src="user.avatarUrl" alt="avatar" />
-          <div>
-            <p class="user-name">
-              <a :href="user?.htmlUrl || '#'" target="_blank" rel="noreferrer">{{ user?.login }}</a>
-              <span v-if="user?.name">（{{ user.name }}）</span>
-            </p>
-            <p class="repo-info">
-              目标仓库：
-              <strong>{{ repo?.owner }} / {{ repo?.name }}</strong>
-              <span> Workflow：{{ repo?.workflowId }} · 分支：{{ repo?.ref }}</span>
-            </p>
-          </div>
-        </div>
-        <div class="user-actions">
-          <button class="ghost" type="button" @click="logout">退出登录</button>
-        </div>
-      </section>
-
       <section v-if="isAuthenticated && missingScopes.length > 0" class="status warning">
         当前授权缺少以下 scope：{{ missingScopes.join(', ') }}，请退出后重新授权。
       </section>
 
       <form class="form" @submit.prevent="handleSubmit">
-        <div v-if="!isAuthenticated" class="auth-inline">
-          <button type="button" class="ghost mini" @click="login">GitHub 登录</button>
-        </div>
         <label class="field">
           <span>ESPHome YAML</span>
           <textarea
@@ -44,17 +21,38 @@
         </label>
 
         <div class="actions">
-          <button :disabled="pending || !canSubmit" type="submit">
-            {{ pending ? '正在提交...' : '提交编译' }}
-          </button>
-          <button
-            :disabled="pending || (!runId && !requestId)"
-            class="ghost"
-            type="button"
-            @click="reset"
-          >
-            重置
-          </button>
+          <div class="primary-actions">
+            <button :disabled="pending || !canSubmit" type="submit">
+              {{ pending ? '正在提交...' : '提交编译' }}
+            </button>
+            <button
+              :disabled="pending || (!runId && !requestId)"
+              class="ghost"
+              type="button"
+              @click="reset"
+            >
+              重置
+            </button>
+          </div>
+          <div class="auth-controls">
+            <div v-if="isAuthenticated" class="auth-user">
+              <img
+                v-if="user?.avatarUrl"
+                :src="user.avatarUrl"
+                alt="avatar"
+              />
+              <div v-else class="avatar-fallback">{{ user?.login?.[0]?.toUpperCase() ?? 'G' }}</div>
+              <button class="ghost mini" type="button" @click="logout">退出</button>
+            </div>
+            <button
+              v-else
+              type="button"
+              class="ghost mini"
+              @click="login"
+            >
+              GitHub 授权
+            </button>
+          </div>
         </div>
         <div v-if="shouldEncouragePersonal" class="personal-hint">
           <p class="hint">
@@ -703,65 +701,9 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
-.user-card {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: center;
-  background: rgba(30, 41, 59, 0.6);
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 1rem;
-  flex-wrap: wrap;
-}
-
-.user-meta {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.user-meta img {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: 2px solid rgba(148, 163, 184, 0.3);
-}
-
-.user-name {
-  margin: 0;
-  font-weight: 600;
-}
-
-.user-name a {
-  color: #f8fafc;
-  text-decoration: none;
-}
-
-.user-name a:hover {
-  text-decoration: underline;
-}
-
-.repo-info {
-  margin: 0.1rem 0 0;
-  color: #cbd5f5;
-  font-size: 0.9rem;
-}
-
-.user-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
 .form {
   display: grid;
   gap: 1.25rem;
-}
-
-.auth-inline {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: -0.5rem;
 }
 
 .field {
@@ -808,9 +750,45 @@ input:not([type='checkbox']):focus {
 
 .actions {
   display: flex;
-  gap: 0.75rem;
-  justify-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
   flex-wrap: wrap;
+}
+
+.primary-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.auth-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.auth-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.auth-user img,
+.avatar-fallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 41, 59, 0.8);
+  color: #e2e8f0;
+  font-weight: 600;
 }
 
 button {
