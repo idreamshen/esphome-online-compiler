@@ -20,6 +20,35 @@
           />
         </label>
 
+        <label class="field">
+          <span>压缩包密码</span>
+          <div class="password-input">
+            <input
+              v-model="artifactPassword"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="64"
+              placeholder="自动生成 16 位字母数字组合"
+              :disabled="pending"
+            />
+            <button
+              type="button"
+              class="ghost mini"
+              :disabled="pending"
+              @click="regenerateArtifactPassword"
+            >
+              重新生成
+            </button>
+          </div>
+          <p class="field-hint">
+            下载固件产物后需要该密码才能解压，可自定义 8-64 位字母或数字组合。
+          </p>
+        </label>
+
         <div class="actions">
           <div class="primary-actions">
             <button :class="{ loading: pending }" :disabled="pending || !canSubmit" type="submit">
@@ -77,6 +106,10 @@
         <p v-if="runUrl">
           <strong>GitHub Workflow：</strong>
           <a :href="runUrl" target="_blank" rel="noreferrer">打开</a>
+        </p>
+        <p>
+          <strong>解压密码：</strong>
+          <span class="password-display">{{ artifactPassword }}</span>
         </p>
         <p v-if="artifact && artifactUrl">
           <strong>固件产物：</strong>
@@ -139,6 +172,7 @@ type PersistedJobState = {
   status: WorkflowStatus;
   artifact: ArtifactMeta | null;
   artifactUrl: string | null;
+  artifactPassword?: string | null;
   tokenSource: TokenSource | null;
 };
 
@@ -149,6 +183,7 @@ type ApiErrorPayload = {
 
 const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
 const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
+const STORAGE_PASSWORD_KEY = 'esphome-online-compiler:artifact-password';
 
 const client = axios.create({
   withCredentials: true
@@ -163,6 +198,7 @@ const requestId = ref<string | null>(null);
 const runUrl = ref<string | null>(null);
 const artifactUrl = ref<string | null>(null);
 const artifact = ref<ArtifactMeta | null>(null);
+const artifactPassword = ref('');
 const pending = ref(false);
 const downloadingArtifact = ref(false);
 const error = ref<string | null>(null);
@@ -243,8 +279,66 @@ function applyServiceTokenDegraded(payload: ApiErrorPayload | undefined) {
   }
 }
 
+function generateRandomPassword(length = 16): string {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bucketLength = characters.length;
+  if (length <= 0) {
+    return '';
+  }
+  const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto ?? null : null;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const randomValues = new Uint32Array(length);
+    cryptoObj.getRandomValues(randomValues);
+    return Array.from(randomValues, (value) => characters[value % bucketLength]).join('');
+  }
+  let result = '';
+  for (let index = 0; index < length; index += 1) {
+    const randomIndex = Math.floor(Math.random() * bucketLength);
+    result += characters[randomIndex];
+  }
+  return result;
+}
+
+function persistPassword(value: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    if (value) {
+      window.localStorage.setItem(STORAGE_PASSWORD_KEY, value);
+    } else {
+      window.localStorage.removeItem(STORAGE_PASSWORD_KEY);
+    }
+  } catch (err) {
+    console.warn('保存压缩包密码失败', err);
+  }
+}
+
+function restorePassword() {
+  if (typeof window === 'undefined') {
+    artifactPassword.value = generateRandomPassword();
+    return;
+  }
+  try {
+    const saved = window.localStorage.getItem(STORAGE_PASSWORD_KEY);
+    if (saved && /^[A-Za-z0-9]{8,64}$/.test(saved)) {
+      artifactPassword.value = saved;
+      return;
+    }
+  } catch (err) {
+    console.warn('恢复压缩包密码失败', err);
+  }
+  artifactPassword.value = generateRandomPassword();
+  persistPassword(artifactPassword.value);
+}
+
+function regenerateArtifactPassword() {
+  artifactPassword.value = generateRandomPassword();
+}
+
 onMounted(() => {
   restoreDraft();
+  restorePassword();
   loadSession();
 });
 
@@ -260,6 +354,13 @@ watch(yaml, (value) => {
     }
   } catch (err) {
     console.warn('保存 YAML 草稿失败', err);
+  }
+});
+
+watch(artifactPassword, (value) => {
+  persistPassword(value);
+  if (requestId.value) {
+    persistJobState();
   }
 });
 
@@ -342,15 +443,34 @@ async function handleSubmit() {
     return;
   }
 
+  const normalizedPassword = artifactPassword.value.trim();
+  if (!normalizedPassword) {
+    error.value = '请设置用于解压产物的密码';
+    return;
+  }
+  if (normalizedPassword.length < 8 || normalizedPassword.length > 64) {
+    error.value = '密码长度需在 8 到 64 个字符之间';
+    return;
+  }
+  if (!/^[A-Za-z0-9]+$/.test(normalizedPassword)) {
+    error.value = '密码仅支持字母与数字组合';
+    return;
+  }
+  if (normalizedPassword !== artifactPassword.value) {
+    artifactPassword.value = normalizedPassword;
+  }
+
   pending.value = true;
   error.value = null;
 
   try {
     const payload: {
       encodedYaml: string;
+      artifactPassword: string;
       useUserToken?: boolean;
     } = {
-      encodedYaml: Base64.encode(yaml.value)
+      encodedYaml: Base64.encode(yaml.value),
+      artifactPassword: normalizedPassword
     };
 
     if (wantsPersonalToken && canUsePersonalToken.value) {
@@ -569,6 +689,9 @@ function restoreJobState() {
     } else {
       artifactUrl.value = null;
     }
+    if (saved.artifactPassword) {
+      artifactPassword.value = saved.artifactPassword;
+    }
 
     pending.value = false;
     downloadingArtifact.value = false;
@@ -606,6 +729,7 @@ function persistJobState() {
     },
     artifact: artifact.value ? { ...artifact.value } : null,
     artifactUrl: artifactUrl.value,
+    artifactPassword: artifactPassword.value || null,
     tokenSource: lastTokenSource.value ?? null
   };
 
@@ -654,6 +778,7 @@ function clearJobState() {
 function reset() {
   clearJobState();
   yaml.value = '';
+  regenerateArtifactPassword();
 }
 
 onBeforeUnmount(() => {
@@ -691,6 +816,36 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   font-size: 0.95rem;
   color: #e2e8f0;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.password-input {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.password-input input {
+  flex: 1;
+}
+
+.password-display {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #e0f2fe;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
 }
 
 textarea {

@@ -333,6 +333,7 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
     deviceName?: string;
     board?: string;
     useUserToken?: boolean;
+    artifactPassword?: string;
   };
 
   try {
@@ -352,9 +353,25 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
   }
 
   const requestId = crypto.randomUUID();
+  const artifactPassword =
+    typeof body.artifactPassword === 'string' ? body.artifactPassword.trim() : '';
+
+  if (!artifactPassword) {
+    return jsonResponse({ message: '压缩包密码不能为空' }, 400);
+  }
+
+  if (artifactPassword.length < 8 || artifactPassword.length > 64) {
+    return jsonResponse({ message: '压缩包密码长度需在 8 到 64 个字符之间' }, 400);
+  }
+
+  if (!/^[A-Za-z0-9]+$/.test(artifactPassword)) {
+    return jsonResponse({ message: '压缩包密码仅支持字母与数字' }, 400);
+  }
+
   const inputs: Record<string, string> = {
     encoded_yaml: encodedYaml,
-    request_id: requestId
+    request_id: requestId,
+    artifact_password: artifactPassword
   };
   if (body.deviceName) {
     inputs.device_name = body.deviceName;
