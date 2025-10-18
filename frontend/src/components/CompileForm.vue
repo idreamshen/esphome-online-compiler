@@ -4,19 +4,8 @@
       <p>正在加载会话...</p>
     </section>
 
-    <section v-else-if="!isAuthenticated" class="auth-card">
-      <h2>使用 GitHub 授权</h2>
-      <p>
-        点击下方按钮跳转至 GitHub 完成 OAuth 授权（仅请求 `repo` 与 `workflow` 权限），回到页面后即可触发编译。
-      </p>
-      <button type="button" @click="login">GitHub 登录</button>
-      <p class="status info">
-        授权过程中不会离开 GitHub 官方页面，也不会将 Token 暴露给第三方。
-      </p>
-    </section>
-
     <template v-else>
-      <section class="user-card">
+      <section v-if="isAuthenticated" class="user-card">
         <div class="user-meta">
           <img v-if="user?.avatarUrl" :src="user.avatarUrl" alt="avatar" />
           <div>
@@ -36,7 +25,16 @@
         </div>
       </section>
 
-      <section v-if="missingScopes.length > 0" class="status warning">
+      <section v-else class="auth-banner">
+        <h2>GitHub 授权</h2>
+        <p>
+          点击下方按钮跳转至 GitHub 完成授权（仅请求 `public_repo`/`repo` 与 `workflow` 权限），即可在本页面提交编译。
+        </p>
+        <button type="button" @click="login">GitHub 登录</button>
+        <p class="status info">登录后即可触发编译并下载固件。</p>
+      </section>
+
+      <section v-if="isAuthenticated && missingScopes.length > 0" class="status warning">
         当前授权缺少以下 scope：{{ missingScopes.join(', ') }}，请退出后重新授权。
       </section>
 
@@ -52,7 +50,7 @@
         </label>
 
         <div class="actions">
-          <button :disabled="pending || missingScopes.length > 0" type="submit">
+          <button :disabled="pending || !canSubmit" type="submit">
             {{ pending ? '正在提交...' : '提交编译' }}
           </button>
           <button
@@ -64,6 +62,7 @@
             重置
           </button>
         </div>
+        <p v-if="!isAuthenticated" class="status info">请先登录 GitHub 后再提交编译。</p>
         <p v-if="error" class="status error">{{ error }}</p>
       </form>
 
@@ -170,6 +169,7 @@ const isAuthenticated = computed(() => Boolean(session.value?.authenticated));
 const user = computed(() => session.value?.user ?? null);
 const repo = computed(() => session.value?.repo ?? null);
 const missingScopes = computed(() => session.value?.missingScopes ?? []);
+const canSubmit = computed(() => isAuthenticated.value && missingScopes.value.length === 0);
 
 const displayStatus = computed(() => {
   if (!status.status) return '尚未开始';
@@ -239,6 +239,11 @@ function logout() {
 }
 
 async function handleSubmit() {
+  if (!isAuthenticated.value) {
+    error.value = '请先登录 GitHub 后再提交编译';
+    return;
+  }
+
   if (!yaml.value.trim()) {
     error.value = '请输入有效的 YAML 内容';
     return;
@@ -521,7 +526,7 @@ onBeforeUnmount(() => {
 }
 
 .loading-card,
-.auth-card {
+.auth-banner {
   text-align: center;
   padding: 2rem 1rem;
   background: rgba(30, 41, 59, 0.6);
@@ -529,7 +534,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
-.auth-card h2 {
+.auth-banner h2 {
   margin-top: 0;
 }
 
