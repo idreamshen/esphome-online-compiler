@@ -1,6 +1,6 @@
 GITHUB_CLIENT_ID=your_client_id
 GITHUB_CLIENT_SECRET=your_client_secret
-GITHUB_OAUTH_REDIRECT_URI=http://127.0.0.1:8787/auth/callback
+GITHUB_OAUTH_REDIRECT_URI=http://localhost:5173/auth/callback
 SESSION_SECRET=generate_a_long_random_value
 GITHUB_REPO_OWNER=your-github-username
 GITHUB_REPO_NAME=esphome-online-compiler
