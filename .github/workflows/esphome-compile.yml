@@ -42,18 +42,17 @@ jobs:
 
       - name: Decode configuration
         id: decode
-        shell: bash
-        env:
-          ENCODED_YAML: ${{ inputs.encoded_yaml }}
         run: |
           set -eo pipefail
-          if [[ -z "$ENCODED_YAML" ]]; then
+          encoded="$(jq -r '.inputs.encoded_yaml' "$GITHUB_EVENT_PATH")"
+
+          if [[ -z "$encoded" || "$encoded" == "null" ]]; then
             echo "Empty encoded YAML input" >&2
             exit 1
           fi
 
-          echo "::add-mask::$ENCODED_YAML"
-          printf '%s' "$ENCODED_YAML" | base64 --decode > config.yaml
+          echo "::add-mask::$encoded"
+          printf '%s' "$encoded" | base64 --decode > config.yaml
           echo "YAML length: $(wc -c < config.yaml)"
           echo "config-path=config.yaml" >> "$GITHUB_OUTPUT"
 
