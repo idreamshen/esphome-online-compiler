@@ -44,33 +44,16 @@
               <div v-else class="avatar-fallback">{{ user?.login?.[0]?.toUpperCase() ?? 'G' }}</div>
               <button class="ghost mini" type="button" @click="logout">退出</button>
             </div>
-            <button
-              v-else
-              type="button"
-              class="ghost mini"
-              @click="login"
-            >
-              GitHub 授权
-            </button>
+            <button v-else type="button" class="ghost mini" @click="login">个人 GitHub 授权</button>
           </div>
         </div>
-        <div v-if="shouldEncouragePersonal" class="personal-hint">
-          <p class="hint">
-            {{
-              isAuthenticated
-                ? '平台 GitHub 授权当前不可用，已自动切换为个人授权。'
-                : '平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。'
-            }}
-          </p>
-          <button
-            v-if="!isAuthenticated"
-            type="button"
-            class="ghost mini"
-            @click="login"
-          >
-            去授权
-          </button>
-        </div>
+        <p v-if="shouldEncouragePersonal" class="personal-hint">
+          {{
+            isAuthenticated
+              ? '平台 GitHub 授权当前不可用，已自动切换为个人授权。'
+              : '平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。'
+          }}
+        </p>
         <p v-if="tokenInfo" class="status info">{{ tokenInfo }}</p>
         <p v-if="submitHint" class="status warning">{{ submitHint }}</p>
         <p v-if="error" class="status error">{{ error }}</p>
