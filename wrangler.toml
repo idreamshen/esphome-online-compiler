@@ -1,3 +1,12 @@
 name = "esphome-online-compiler"
 compatibility_date = "2024-06-20"
 pages_build_output_dir = "frontend/dist"
+
+GITHUB_CLIENT_ID=Ov23li8PE8zg9hobXUtT
+GITHUB_OAUTH_REDIRECT_URI=https://esphome.idreamshen.com/auth/callback
+GITHUB_REPO_OWNER=idreamshen
+GITHUB_REPO_NAME=esphome-online-compiler
+GITHUB_WORKFLOW_ID=esphome-compile.yml
+GITHUB_WORKFLOW_REF=main
+FRONTEND_URL=https://esphome.idreamshen.com
+ALLOWED_ORIGINS=https://esphome.idreamshen.com
