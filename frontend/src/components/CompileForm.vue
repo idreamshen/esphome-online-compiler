@@ -305,7 +305,7 @@ function startPolling() {
           : '获取状态失败';
       clearPolling();
     }
-  }, 5000);
+  }, 10_000);
 }
 
 async function refreshStatus() {
