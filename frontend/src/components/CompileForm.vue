@@ -23,7 +23,7 @@
         <section v-if="hasSecrets" class="secrets-panel">
           <h3>Secret 替换</h3>
           <p class="field-hint">
-            检测到 YAML 中包含 <code>!secret</code> 占位符，请在下方填写对应的真实值，这些值仅在本地使用，不会持久保存。
+            检测到 YAML 中包含 <code>!secret</code> 占位符，请在下方填写对应的真实值。
           </p>
           <section v-for="name in secretNames" :key="name" class="secret-item">
             <label class="field">
@@ -219,6 +219,7 @@ type ApiErrorPayload = {
 const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
 const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
 const STORAGE_PASSWORD_KEY = 'esphome-online-compiler:artifact-password';
+const STORAGE_SECRETS_KEY = 'esphome-online-compiler:secret-values';
 
 const client = axios.create({
   withCredentials: true
@@ -459,6 +460,62 @@ function updateSecretPlaceholders(source: string) {
       revealedSecrets[name] = false;
     }
   });
+
+  const saved = loadPersistedSecrets();
+  found.forEach((name) => {
+    if (!secretValues[name] && saved[name]) {
+      secretValues[name] = saved[name];
+    }
+  });
+  persistSecrets();
+}
+
+function loadPersistedSecrets(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_SECRETS_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+      if (typeof value === 'string') {
+        result[key] = value;
+      }
+    });
+    return result;
+  } catch (err) {
+    console.warn('恢复 secret 值失败', err);
+    return {};
+  }
+}
+
+function persistSecrets() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const payload: Record<string, string> = {};
+    secretNames.value.forEach((name) => {
+      const value = secretValues[name];
+      if (typeof value === 'string' && value) {
+        payload[name] = value;
+      }
+    });
+    if (Object.keys(payload).length > 0) {
+      window.localStorage.setItem(STORAGE_SECRETS_KEY, JSON.stringify(payload));
+    } else {
+      window.localStorage.removeItem(STORAGE_SECRETS_KEY);
+    }
+  } catch (err) {
+    console.warn('保存 secret 值失败', err);
+  }
 }
 
 function formatSecretValue(value: string): string {
@@ -503,6 +560,7 @@ function clearSecrets() {
   Object.keys(revealedSecrets).forEach((key) => {
     delete revealedSecrets[key];
   });
+  persistSecrets();
 }
 
 onMounted(() => {
@@ -534,6 +592,17 @@ watch(artifactPassword, (value) => {
     persistJobState();
   }
 });
+
+watch(
+  secretValues,
+  () => {
+    persistSecrets();
+    if (requestId.value) {
+      persistJobState();
+    }
+  },
+  { deep: true }
+);
 
 watch([isAuthenticated, shouldEncouragePersonal], ([authed, encourage]) => {
   if (encourage && authed && missingScopes.value.length === 0) {
