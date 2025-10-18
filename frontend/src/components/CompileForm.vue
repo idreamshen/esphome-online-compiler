@@ -1,17 +1,17 @@
 <template>
   <section class="panel">
     <section v-if="!sessionLoaded" class="loading-card">
-      <p>正在加载...</p>
+      <p>{{ t('compileForm.loading') }}</p>
     </section>
 
     <template v-else>
       <section v-if="isAuthenticated && missingScopes.length > 0" class="status warning">
-        当前授权缺少以下 scope：{{ missingScopes.join(', ') }}，请退出后重新授权。
+        {{ t('compileForm.missingScopes', { scopes: missingScopes.join(', ') }) }}
       </section>
 
       <form class="form" @submit.prevent="handleSubmit">
         <label class="field">
-          <span>ESPHome YAML</span>
+          <span>{{ t('compileForm.fields.yaml.label') }}</span>
           <YamlEditor
             v-model="yaml"
             :placeholder="YAML_PLACEHOLDER"
@@ -19,9 +19,13 @@
         </label>
 
         <section v-if="hasSecrets" class="secrets-panel">
-          <h3>Secret 替换</h3>
+          <h3>{{ t('compileForm.secrets.title') }}</h3>
           <p class="field-hint">
-            检测到 YAML 中包含 <code>!secret</code> 占位符，请在下方填写对应的真实值。
+            <i18n-t keypath="compileForm.secrets.description">
+              <template #code>
+                <code>!secret</code>
+              </template>
+            </i18n-t>
           </p>
           <section v-for="name in secretNames" :key="name" class="secret-item">
             <label class="field">
@@ -30,7 +34,7 @@
                 <input
                   :type="revealedSecrets[name] ? 'text' : 'password'"
                   v-model="secretValues[name]"
-                  placeholder="请输入值"
+                  :placeholder="t('compileForm.secrets.inputPlaceholder')"
                   autocomplete="off"
                   autocorrect="off"
                   autocapitalize="none"
@@ -43,25 +47,25 @@
                   :disabled="pending"
                   @click="toggleSecretVisibility(name)"
                 >
-                  {{ revealedSecrets[name] ? '隐藏' : '显示' }}
+                  {{ revealedSecrets[name] ? t('compileForm.actions.hideSecret') : t('compileForm.actions.showSecret') }}
                 </button>
               </div>
             </label>
           </section>
           <p v-if="missingSecretNames.length > 0" class="status warning">
-            仍有 {{ missingSecretNames.length }} 个 secret 未填写：{{ missingSecretNames.join(', ') }}
+            {{ t('compileForm.secrets.missing', { count: missingSecretNames.length, names: missingSecretNames.join(', ') }) }}
           </p>
         </section>
 
         <label class="field">
-          <span>ESPHome 版本</span>
+          <span>{{ t('compileForm.fields.esphomeVersion.label') }}</span>
           <select v-model="esphomeVersionSelection" :disabled="pending">
             <option
               v-for="option in ESPHOME_VERSION_OPTIONS"
               :key="option.value || 'latest'"
               :value="option.value"
             >
-              {{ option.label }}
+              {{ option.labelKey ? t(option.labelKey) : option.value }}
             </option>
           </select>
           <input
@@ -74,15 +78,15 @@
             autocapitalize="none"
             spellcheck="false"
             :disabled="pending"
-            placeholder="例如 2025.10.1"
+            :placeholder="t('compileForm.fields.esphomeVersion.customPlaceholder')"
           />
           <p class="field-hint">
-            留空则自动使用最新稳定版，可输入具体版本号编译历史版本。
+            {{ t('compileForm.fields.esphomeVersion.hint') }}
           </p>
         </label>
 
         <label class="field">
-          <span>压缩包密码</span>
+          <span>{{ t('compileForm.fields.artifactPassword.label') }}</span>
           <div class="password-input">
             <input
               v-model="artifactPassword"
@@ -93,7 +97,7 @@
               autocapitalize="none"
               spellcheck="false"
               maxlength="64"
-              placeholder="自动生成 16 位字母数字组合"
+              :placeholder="t('compileForm.fields.artifactPassword.placeholder')"
               :disabled="pending"
             />
             <button
@@ -102,18 +106,18 @@
               :disabled="pending"
               @click="regenerateArtifactPassword"
             >
-              重新生成
+              {{ t('compileForm.fields.artifactPassword.regenerate') }}
             </button>
           </div>
           <p class="field-hint">
-            下载固件产物后需要该密码才能解压，可自定义 8-64 位字母或数字组合。
+            {{ t('compileForm.fields.artifactPassword.hint') }}
           </p>
         </label>
 
         <div class="actions">
           <div class="primary-actions">
             <button :class="{ loading: pending }" :disabled="pending || !canSubmit" type="submit">
-              {{ pending ? '正在提交...' : '提交编译' }}
+              {{ pending ? t('compileForm.actions.submitting') : t('compileForm.actions.submit') }}
             </button>
             <button
               :disabled="!canReset"
@@ -121,7 +125,7 @@
               type="button"
               @click="reset"
             >
-              重置
+              {{ t('compileForm.actions.reset') }}
             </button>
           </div>
           <div class="auth-controls">
@@ -129,10 +133,10 @@
               <img
                 v-if="user?.avatarUrl"
                 :src="user.avatarUrl"
-                alt="avatar"
+                :alt="t('compileForm.auth.avatarAlt')"
               />
               <div v-else class="avatar-fallback">{{ user?.login?.[0]?.toUpperCase() ?? 'G' }}</div>
-              <button class="ghost mini" type="button" @click="logout">退出</button>
+              <button class="ghost mini" type="button" @click="logout">{{ t('compileForm.auth.logout') }}</button>
             </div>
             <button
               v-else
@@ -142,49 +146,49 @@
               :disabled="authLoading"
               @click="login"
             >
-              个人 GitHub 授权
+              {{ t('compileForm.auth.login') }}
             </button>
           </div>
         </div>
         <p v-if="shouldEncouragePersonal && !isAuthenticated" class="personal-hint">
-          平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。
+          {{ t('compileForm.auth.encouragePersonal') }}
         </p>
         <p v-if="submitHint" class="status warning">{{ submitHint }}</p>
         <p v-if="error" class="status error">{{ error }}</p>
       </form>
 
       <section v-if="requestId" class="status-card">
-        <h2>编译状态</h2>
-        <p><strong>请求 ID：</strong> {{ requestId }}</p>
-        <p v-if="runId"><strong>Workflow Run ID：</strong> {{ runId }}</p>
+        <h2>{{ t('compileForm.status.sectionTitle') }}</h2>
+        <p><strong>{{ t('compileForm.status.requestId') }}</strong> {{ requestId }}</p>
+        <p v-if="runId"><strong>{{ t('compileForm.status.runId') }}</strong> {{ runId }}</p>
         <p>
-          <strong>当前状态：</strong>
+          <strong>{{ t('compileForm.status.currentStatus') }}</strong>
           <span :class="['badge', statusClass]">
             <span v-if="isStatusLoading" class="badge-spinner" aria-hidden="true"></span>
             {{ displayStatus }}
           </span>
         </p>
         <p v-if="runUrl">
-          <strong>GitHub Workflow：</strong>
-          <button class="link-button" type="button" @click="openRunUrl">打开</button>
+          <strong>{{ t('compileForm.status.runLinkLabel') }}</strong>
+          <button class="link-button" type="button" @click="openRunUrl">{{ t('compileForm.status.openRun') }}</button>
         </p>
         <p>
-          <strong>ESPHome 版本：</strong>
+          <strong>{{ t('compileForm.status.esphomeVersion') }}</strong>
           {{ esphomeVersionLabel }}
         </p>
         <p>
-          <strong>解压密码：</strong>
+          <strong>{{ t('compileForm.status.artifactPassword') }}</strong>
           <span class="password-display">{{ artifactPassword }}</span>
         </p>
         <p v-if="artifact && artifactUrl">
-          <strong>固件产物：</strong>
+          <strong>{{ t('compileForm.status.artifact') }}</strong>
           <button
             :disabled="downloadingArtifact"
             :class="['ghost', { loading: downloadingArtifact }]"
             type="button"
             @click="downloadArtifact"
           >
-            {{ downloadingArtifact ? '下载中...' : `下载 ${artifact.name}.zip` }}
+            {{ downloadingArtifact ? t('compileForm.status.downloading') : t('compileForm.status.downloadArtifact', { name: artifact.name }) }}
           </button>
         </p>
       </section>
@@ -196,6 +200,7 @@
 import axios from 'axios';
 import { Base64 } from 'js-base64';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import YamlEditor from './YamlEditor.vue';
 
 type TokenSource = 'service' | 'session';
@@ -248,6 +253,8 @@ type ApiErrorPayload = {
   serviceTokenDegraded?: boolean;
 };
 
+const { t, te } = useI18n();
+
 const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
 const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
 const STORAGE_PASSWORD_KEY = 'esphome-online-compiler:artifact-password';
@@ -257,13 +264,13 @@ const YAML_PLACEHOLDER = `esphome:
   name: mydevice
 ...`;
 
-const ESPHOME_VERSION_OPTIONS = [
-  { value: '', label: '最新稳定版（自动）' },
-  { value: '2025.10.1', label: '2025.10.1' },
-  { value: '2025.9.0', label: '2025.9.0' },
-  { value: '2025.8.3', label: '2025.8.3' },
-  { value: '__custom__', label: '自定义...' }
-] as const;
+const ESPHOME_VERSION_OPTIONS: ReadonlyArray<{ value: string; labelKey?: string }> = [
+  { value: '', labelKey: 'compileForm.fields.esphomeVersion.options.latest' },
+  { value: '2025.10.1' },
+  { value: '2025.9.0' },
+  { value: '2025.8.3' },
+  { value: '__custom__', labelKey: 'compileForm.fields.esphomeVersion.options.custom' }
+];
 
 const client = axios.create({
   withCredentials: true
@@ -295,13 +302,16 @@ const selectedEsphomeVersion = ref('');
 const esphomeVersionSelection = ref<string>(ESPHOME_VERSION_OPTIONS[0].value);
 const esphomeVersionLabel = computed(() => {
   if (!selectedEsphomeVersion.value) {
-    return '最新稳定版';
+    return t('compileForm.fields.esphomeVersion.defaultLabel');
   }
   const match = ESPHOME_VERSION_OPTIONS.find(
     (option) => option.value === selectedEsphomeVersion.value
   );
   if (match && match.value !== '__custom__') {
-    return match.label;
+    if (match.labelKey) {
+      return t(match.labelKey);
+    }
+    return match.value;
   }
   return selectedEsphomeVersion.value;
 });
@@ -341,10 +351,10 @@ const submitHint = computed(() => {
     return null;
   }
   if (!isAuthenticated.value) {
-    return '请先完成 GitHub 授权后再提交编译。';
+    return t('compileForm.submitHints.loginRequired');
   }
   if (missingScopes.value.length > 0) {
-    return '当前 GitHub 授权缺少 workflow/public_repo 权限，请重新授权后再试。';
+    return t('compileForm.submitHints.missingScopes');
   }
   return null;
 });
@@ -361,12 +371,23 @@ const canReset = computed(() => {
 });
 
 const displayStatus = computed(() => {
-  if (!status.status) return '尚未开始';
-  if (status.status === 'completed') {
-    return status.conclusion === 'success' ? '完成' : status.conclusion || '完成';
+  if (!status.status) {
+    return t('compileForm.statusDisplay.notStarted');
   }
-  if (status.status === 'in_progress') return '运行中';
-  if (status.status === 'queued') return '排队中';
+  if (status.status === 'completed') {
+    if (status.conclusion) {
+      const conclusionKey = `compileForm.statusDisplay.conclusion.${status.conclusion}`;
+      if (te(conclusionKey)) {
+        return t(conclusionKey);
+      }
+      return status.conclusion;
+    }
+    return t('compileForm.statusDisplay.completed');
+  }
+  const statusKey = `compileForm.statusDisplay.status.${status.status}`;
+  if (te(statusKey)) {
+    return t(statusKey);
+  }
   return status.status;
 });
 
@@ -428,7 +449,7 @@ function persistPassword(value: string) {
       window.localStorage.removeItem(STORAGE_PASSWORD_KEY);
     }
   } catch (err) {
-    console.warn('保存压缩包密码失败', err);
+    console.warn('Failed to persist artifact password', err);
   }
 }
 
@@ -444,7 +465,7 @@ function restorePassword() {
       return;
     }
   } catch (err) {
-    console.warn('恢复压缩包密码失败', err);
+    console.warn('Failed to restore artifact password', err);
   }
   artifactPassword.value = generateRandomPassword();
   persistPassword(artifactPassword.value);
@@ -461,7 +482,7 @@ function persistEsphomeVersion(value: string) {
       window.localStorage.removeItem(STORAGE_VERSION_KEY);
     }
   } catch (err) {
-    console.warn('保存 ESPHome 版本失败', err);
+    console.warn('Failed to persist ESPHome version', err);
   }
 }
 
@@ -481,7 +502,7 @@ function restoreEsphomeVersion() {
       return;
     }
   } catch (err) {
-    console.warn('恢复 ESPHome 版本失败', err);
+    console.warn('Failed to restore ESPHome version', err);
   }
   selectedEsphomeVersion.value = '';
   customEsphomeVersion.value = '';
@@ -587,7 +608,7 @@ function loadPersistedSecrets(): Record<string, string> {
     });
     return result;
   } catch (err) {
-    console.warn('恢复 secret 值失败', err);
+    console.warn('Failed to restore secret values', err);
     return {};
   }
 }
@@ -610,7 +631,7 @@ function persistSecrets() {
       window.localStorage.removeItem(STORAGE_SECRETS_KEY);
     }
   } catch (err) {
-    console.warn('保存 secret 值失败', err);
+    console.warn('Failed to persist secret values', err);
   }
 }
 
@@ -678,7 +699,7 @@ watch(yaml, (value) => {
       window.localStorage.removeItem(STORAGE_DRAFT_KEY);
     }
   } catch (err) {
-    console.warn('保存 YAML 草稿失败', err);
+    console.warn('Failed to persist YAML draft', err);
   }
   updateSecretPlaceholders(value);
 });
@@ -775,7 +796,7 @@ async function loadSession() {
       preferPersonalToken.value = false;
     }
   } catch (err) {
-    console.error('加载 session 失败', err);
+    console.error('Failed to load session', err);
     session.value = { authenticated: false };
     preferPersonalToken.value = false;
     serviceTokenDegraded.value = true;
@@ -803,7 +824,7 @@ function logout() {
 
 async function handleSubmit() {
   if (!yaml.value.trim()) {
-    error.value = '请输入有效的 YAML 内容';
+    error.value = t('compileForm.errors.invalidYaml');
     return;
   }
 
@@ -811,22 +832,22 @@ async function handleSubmit() {
     preferPersonalToken.value || !serviceTokenAvailable.value || serviceTokenDegraded.value;
   if (wantsPersonalToken) {
     if (!isAuthenticated.value) {
-      error.value = '请先登录 GitHub 后再提交编译';
+      error.value = t('compileForm.errors.loginRequired');
       return;
     }
     if (!canUsePersonalToken.value) {
-      error.value = '当前授权缺少必要的 GitHub 权限，请重新授权';
+      error.value = t('compileForm.errors.missingScopes');
       return;
     }
   } else if (!serviceTokenAvailable.value && !isAuthenticated.value) {
-    error.value = '请先登录 GitHub 后再提交编译';
+    error.value = t('compileForm.errors.loginRequired');
     return;
   }
 
   if (secretNames.value.length > 0) {
     const missing = secretNames.value.filter((name) => !(secretValues[name]?.trim()));
     if (missing.length > 0) {
-      error.value = `请为以下 secret 提供具体值：${missing.join(', ')}`;
+      error.value = t('compileForm.errors.secretsMissing', { names: missing.join(', ') });
       return;
     }
   }
@@ -834,21 +855,21 @@ async function handleSubmit() {
   const yamlForCompile = applySecretValues(yaml.value);
 
   if (yamlForCompile.length > 200_000) {
-    error.value = 'YAML 太大，请控制在 200KB 内';
+    error.value = t('compileForm.errors.yamlTooLarge');
     return;
   }
 
   const normalizedPassword = artifactPassword.value.trim();
   if (!normalizedPassword) {
-    error.value = '请设置用于解压产物的密码';
+    error.value = t('compileForm.errors.passwordRequired');
     return;
   }
   if (normalizedPassword.length < 8 || normalizedPassword.length > 64) {
-    error.value = '密码长度需在 8 到 64 个字符之间';
+    error.value = t('compileForm.errors.passwordLength');
     return;
   }
   if (!/^[A-Za-z0-9]+$/.test(normalizedPassword)) {
-    error.value = '密码仅支持字母与数字组合';
+    error.value = t('compileForm.errors.passwordCharset');
     return;
   }
   if (normalizedPassword !== artifactPassword.value) {
@@ -902,7 +923,7 @@ async function handleSubmit() {
     runUrl.value = data.htmlUrl ?? null;
     status.status = 'queued';
     status.conclusion = '';
-    status.message = data.message ?? 'Workflow 已触发，等待运行...';
+    status.message = data.message ?? t('compileForm.status.workflowQueued');
     const resolvedSource =
       data.tokenSource ??
       (wantsPersonalToken && canUsePersonalToken.value
@@ -927,11 +948,11 @@ async function handleSubmit() {
     persistJobState();
     startPolling();
   } catch (err) {
-    console.error('触发编译失败', err);
+    console.error('Failed to trigger compilation', err);
     const payload = axios.isAxiosError(err)
       ? (err.response?.data as ApiErrorPayload | undefined)
       : undefined;
-    const message = payload?.message ?? '触发编译失败，请稍后再试';
+    const message = payload?.message ?? t('compileForm.errors.triggerFailed');
     applyServiceTokenDegraded(payload);
     error.value = payload?.serviceTokenDegraded ? null : message;
   } finally {
@@ -945,11 +966,11 @@ function startPolling() {
     try {
       await refreshStatus();
     } catch (err) {
-      console.error('刷新状态失败', err);
+      console.error('Failed to refresh workflow status', err);
       const payload = axios.isAxiosError(err)
         ? (err.response?.data as ApiErrorPayload | undefined)
         : undefined;
-      const message = payload?.message ?? '获取状态失败';
+      const message = payload?.message ?? t('compileForm.errors.statusFailed');
       applyServiceTokenDegraded(payload);
       error.value = payload?.serviceTokenDegraded ? null : message;
       clearPolling();
@@ -1018,11 +1039,11 @@ async function downloadArtifact() {
     window.URL.revokeObjectURL(blobUrl);
     persistJobState();
   } catch (err) {
-    console.error('下载产物失败', err);
+    console.error('Failed to download artifact', err);
     const payload = axios.isAxiosError(err)
       ? (err.response?.data as ApiErrorPayload | undefined)
       : undefined;
-    const message = payload?.message ?? '下载固件失败，请检查权限或稍后重试';
+    const message = payload?.message ?? t('compileForm.errors.downloadFailed');
     applyServiceTokenDegraded(payload);
     error.value = payload?.serviceTokenDegraded ? null : message;
   } finally {
@@ -1040,7 +1061,7 @@ function restoreDraft() {
       yaml.value = draft;
     }
   } catch (err) {
-    console.warn('恢复 YAML 草稿失败', err);
+    console.warn('Failed to restore YAML draft', err);
   }
 }
 
@@ -1116,7 +1137,7 @@ function restoreJobState() {
 
     persistJobState();
   } catch (err) {
-    console.warn('恢复任务状态失败', err);
+    console.warn('Failed to restore job state', err);
     clearPersistedJob();
   }
 }
@@ -1150,7 +1171,7 @@ function persistJobState() {
   try {
     window.localStorage.setItem(STORAGE_JOB_KEY, JSON.stringify(payload));
   } catch (err) {
-    console.warn('保存任务状态失败', err);
+    console.warn('Failed to persist job state', err);
   }
 }
 
@@ -1161,7 +1182,7 @@ function clearPersistedJob() {
   try {
     window.localStorage.removeItem(STORAGE_JOB_KEY);
   } catch (err) {
-    console.warn('清理任务缓存失败', err);
+    console.warn('Failed to clear job cache', err);
   }
 }
 
@@ -1464,6 +1485,10 @@ button.loading::after {
 
 .status-card p:last-of-type {
   margin-bottom: 0;
+}
+
+.status-card strong {
+  margin-right: 0.5rem;
 }
 
 .secrets-panel {
