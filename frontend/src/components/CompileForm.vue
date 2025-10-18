@@ -22,7 +22,7 @@
 
         <div class="actions">
           <div class="primary-actions">
-            <button :disabled="pending || !canSubmit" type="submit">
+            <button :class="{ loading: pending }" :disabled="pending || !canSubmit" type="submit">
               {{ pending ? '正在提交...' : '提交编译' }}
             </button>
             <button
@@ -44,17 +44,21 @@
               <div v-else class="avatar-fallback">{{ user?.login?.[0]?.toUpperCase() ?? 'G' }}</div>
               <button class="ghost mini" type="button" @click="logout">退出</button>
             </div>
-            <button v-else type="button" class="ghost mini" @click="login">个人 GitHub 授权</button>
+            <button
+              v-else
+              type="button"
+              class="ghost mini"
+              :class="{ loading: authLoading }"
+              :disabled="authLoading"
+              @click="login"
+            >
+              个人 GitHub 授权
+            </button>
           </div>
         </div>
-        <p v-if="shouldEncouragePersonal" class="personal-hint">
-          {{
-            isAuthenticated
-              ? '平台 GitHub 授权当前不可用，已自动切换为个人授权。'
-              : '平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。'
-          }}
+        <p v-if="shouldEncouragePersonal && !isAuthenticated" class="personal-hint">
+          平台 GitHub 授权当前不可用，请使用个人 GitHub 授权继续编译。
         </p>
-        <p v-if="tokenInfo" class="status info">{{ tokenInfo }}</p>
         <p v-if="submitHint" class="status warning">{{ submitHint }}</p>
         <p v-if="error" class="status error">{{ error }}</p>
       </form>
@@ -75,7 +79,7 @@
           <strong>固件产物：</strong>
           <button
             :disabled="downloadingArtifact"
-            class="ghost"
+            :class="['ghost', { loading: downloadingArtifact }]"
             type="button"
             @click="downloadArtifact"
           >
@@ -168,6 +172,7 @@ const pollTimer = ref<number | null>(null);
 const preferPersonalToken = ref(false);
 const lastTokenSource = ref<TokenSource | null>(null);
 const serviceTokenDegraded = ref(false);
+const authLoading = ref(false);
 
 const status = reactive<WorkflowStatus>({
   status: '',
@@ -207,18 +212,7 @@ const submitHint = computed(() => {
   }
   return null;
 });
-const tokenInfo = computed(() => {
-  if (preferPersonalToken.value && canUsePersonalToken.value) {
-    return '将使用个人 GitHub 授权触发编译。';
-  }
-  if (!preferPersonalToken.value && serviceTokenAvailable.value && !serviceTokenDegraded.value) {
-    return '将使用平台提供的 GitHub 授权触发编译。';
-  }
-  if (!serviceTokenAvailable.value && canUsePersonalToken.value) {
-    return '将使用个人 GitHub 授权触发编译。';
-  }
-  return null;
-});
+const tokenInfo = computed(() => null);
 
 const displayStatus = computed(() => {
   if (!status.status) return '尚未开始';
@@ -306,10 +300,13 @@ async function loadSession() {
     } else {
       clearJobState();
     }
+    authLoading.value = false;
   }
 }
 
 function login() {
+  if (authLoading.value) return;
+  authLoading.value = true;
   window.location.href = '/auth/login';
 }
 
@@ -795,6 +792,45 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.loading {
+  position: relative;
+  padding-right: 2.75rem;
+}
+
+button.loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(226, 232, 240, 0.8);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.ghost.loading {
+  padding-right: 2.4rem;
+}
+
+.ghost.mini.loading {
+  padding-right: 2rem;
+}
+
+.ghost.loading::after {
+  border-color: rgba(148, 163, 184, 0.9);
+  border-top-color: transparent;
+}
+
+.ghost.mini.loading::after {
+  right: 0.75rem;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+}
+
 .ghost {
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.4);
@@ -808,17 +844,18 @@ button:disabled {
 }
 
 .personal-hint {
-  margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.personal-hint .hint {
-  margin: 0;
+  margin: 0.5rem 0 0;
   font-size: 0.82rem;
   color: #fef08a;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .status {
