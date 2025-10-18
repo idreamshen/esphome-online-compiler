@@ -1275,12 +1275,31 @@ textarea {
     Monaco, Consolas, monospace;
   font-size: 0.9rem;
   line-height: 1.45;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
 }
 
 textarea:focus {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
+textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.65), rgba(56, 189, 248, 0.65));
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.85), rgba(56, 189, 248, 0.85));
 }
 
 input:not([type='checkbox']) {
