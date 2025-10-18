@@ -1,74 +1,76 @@
 * ESPHome 在线编译平台
 
-前端（Vue 3）+ Cloudflare Worker + GitHub Actions 的在线 ESPHome 编译平台：用户通过 GitHub OAuth 授权后，直接在浏览器里提交 YAML 即可触发 Workflow，下载固件，无需手填 Personal Access Token。
+Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户通过 GitHub OAuth 授权后，直接在浏览器中提交 ESPHome YAML，即可触发 Workflow 编译并下载固件，无需手填 Personal Access Token。
 
-* 架构概览
-  - `frontend/`：Vite + Vue 3 单页应用，负责 OAuth 登录、YAML 提交/轮询、产物下载；
-  - `worker/`：Cloudflare Worker 充当轻量后端，完成 GitHub OAuth 交换、存储会话 Cookie、代理调用 GitHub REST API；
-  - `.github/workflows/esphome-compile.yml`：真正执行 ESPHome 编译并上传产物的 GitHub Actions Workflow。
+* 目录结构
+  - `frontend/`：Vite + Vue 3 单页应用，负责 OAuth 登录、YAML 输入、状态轮询与固件下载；
+  - `functions/`：Cloudflare Pages Functions（`[[path]].ts`）实现 GitHub OAuth、Session 管理与 Actions API 代理；
+  - `.github/workflows/esphome-compile.yml`：实际执行编译的 GitHub Actions Workflow；
+  - `.dev.vars.example`：本地开发时可复制为 `.dev.vars`，提供所需环境变量示例；
+  - `wrangler.toml`：Pages 项目基本配置（无敏感信息）。
 
 * 准备 GitHub OAuth App
-  1. 打开 [[https://github.com/settings/developers][GitHub Settings → Developer settings → OAuth Apps]]，创建新的 OAuth App。
-  2. Home / Callback URL 建议填写你的 Worker 域名，例如：
-     - Homepage URL：`https://your-worker.workers.dev/`
-     - Authorization callback URL：`https://your-worker.workers.dev/auth/callback`
-  3. 创建完成后记下 `Client ID`，点击「Generate a new client secret」保留 `Client Secret`。
-  4. 稍后 Worker 会用到这两组凭据并向 GitHub 请求 `repo` + `workflow` scope，用户授权后即可触发公开仓库的 workflow_dispatch。
+  1. 访问 [[https://github.com/settings/developers][GitHub Settings → Developer settings → OAuth Apps]] 创建新的 OAuth App；
+  2. Homepage / Callback URL 建议设置为将来 Cloudflare Pages 的域名，例如：
+     - Homepage：`https://your-project.pages.dev/`
+     - Authorization callback URL：`https://your-project.pages.dev/auth/callback`
+  3. 记录 `Client ID`，并点击「Generate a new client secret」保存 `Client Secret`；
+  4. Pages Functions 会请求 `repo` + `workflow` scope，以便在 public 仓库中触发 `workflow_dispatch`。
 
-* 配置 Cloudflare Worker
-  1. 安装工具：`npm install -g wrangler`。
-  2. 进入 `worker/` 目录，执行 `npm install` 安装依赖。
-  3. 在 Cloudflare 控制台创建一个新的 Worker 服务，或直接使用 wrangler 部署。
-  4. 将以下变量通过 `wrangler secret put ...` 设置到 Worker 环境：
-     - `GITHUB_CLIENT_ID`：OAuth App 的 Client ID；
-     - `GITHUB_CLIENT_SECRET`：OAuth App 的 Client Secret；
-     - `SESSION_SECRET`：任意至少 32 字节的随机字符串（用于 Cookie 签名，可用 `openssl rand -base64 32` 生成）；
-     - `GITHUB_REPO_OWNER`：存放 workflow 的 GitHub 用户名/组织名；
-     - `GITHUB_REPO_NAME`：仓库名；
-     - `GITHUB_WORKFLOW_ID`：要触发的 workflow 文件名，例如 `esphome-compile.yml`；
-     - `GITHUB_WORKFLOW_REF`：触发 workflow 的分支，默认 `main`；
-     - `GITHUB_OAUTH_REDIRECT_URI`：与 OAuth App callback 保持一致，例如 `https://your-worker.workers.dev/auth/callback`；
-     - `FRONTEND_URL`：授权结束后的跳转地址（部署后可指向前端页面，如 `https://esphome.example.com/`）；
-     - `ALLOWED_ORIGINS`：允许发送跨域请求的前端域名，多个地址用逗号分隔，开发环境可填 `http://localhost:5173`。
-  5. 本地调试：在 `worker/` 中运行 `npm run dev`（等价于 `wrangler dev`），默认监听 `http://127.0.0.1:8787`。
-  6. 部署到生产：`npm run deploy`。
+* Cloudflare Pages 配置
+  1. 在 Cloudflare 控制台创建 Pages 项目（选择连接 Git 仓库或手动上传）；
+  2. 构建设置建议：
+     - Build Command：`npm install && npm run build --prefix frontend`
+     - Build Output Directory：`frontend/dist`
+     - Functions Directory（自动识别）：`functions`
+  3. 在 Pages → Settings → Environment variables 中添加以下变量（生产和 Preview 环境都需配置）：
+     - `GITHUB_CLIENT_ID`
+     - `GITHUB_CLIENT_SECRET`
+     - `SESSION_SECRET`（随机 32+ 字节字符串，可用 `openssl rand -base64 32` 生成）
+     - `GITHUB_OAUTH_REDIRECT_URI`（形如 `https://your-project.pages.dev/auth/callback`）
+     - `GITHUB_REPO_OWNER`
+     - `GITHUB_REPO_NAME`
+     - `GITHUB_WORKFLOW_ID`（如 `esphome-compile.yml`）
+     - `GITHUB_WORKFLOW_REF`（默认 `main`）
+     - `FRONTEND_URL`（生产环境可写 Pages 域名，方便授权回跳）
+     - `ALLOWED_ORIGINS`（逗号分隔允许跨域的前端地址，至少包含 Pages 域名；本地开发可加 `http://localhost:5173`）
 
 * 本地开发
-  1. 终端 A：
-     #+begin_src shell
-     cd worker
-     npm install
-     wrangler dev --local
-     #+end_src
-  2. 终端 B：
+  1. 安装依赖并运行前端：
      #+begin_src shell
      cd frontend
      npm install
      npm run dev
      #+end_src
-  3. 浏览器访问 `http://localhost:5173`，通过 Vite 代理会把 `/auth/*` 与 `/api/*` 请求转发到 `http://127.0.0.1:8787` 的 Worker。
+  2. 在仓库根目录复制 `.dev.vars.example` 为 `.dev.vars`，填入测试所需的 OAuth 配置；
+  3. 另开终端，启动 Pages Functions 本地环境（Cloudflare CLI）：
+     #+begin_src shell
+     # 首次需要安装 CLI：npm install -g wrangler
+     wrangler pages dev frontend/dist --local --port 8787
+     # 若 dist 目录不存在，可先执行一次 npm run build --prefix frontend
+     #+end_src
+  4. 浏览器访问 `http://localhost:5173`，前端会通过 Vite 代理把 `/auth/*`、`/api/*` 请求转发到 `http://127.0.0.1:8787` 的 Pages Functions。
 
-* 使用说明
-  1. 首次访问点击「GitHub 登录」，跳转到 GitHub 授权页，同意 `repo` 与 `workflow` 权限。
-  2. 返回前端后，粘贴/编辑 ESPHome YAML，可选填写设备名和板子。
-  3. 点击「提交编译」，前端会 Base64 编码后通过 Worker 触发 `workflow_dispatch`。
-  4. 等待状态轮询完成：成功则显示产物下载按钮，失败可点开 GitHub Workflow 页面查看日志。
-  5. 退出登录会清理会话 Cookie，如需更换账号或重新授权 scope 可以使用该按钮。
+* 使用流程
+  1. 点击「GitHub 登录」进入官方授权页，同意 `repo` 与 `workflow` 权限；
+  2. 回到页面后填写 ESPHome YAML，可选输入设备名称、板子类型；
+  3. 提交后系统会将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`；
+  4. 前端定时轮询 Workflow 状态，完成后显示可下载的固件产物；
+  5. 如需切换账户或重新授权，使用「退出登录」按钮清除会话。
 
 * GitHub Actions Workflow
-  - `config.yaml` 会根据输入的 Base64 内容生成；
-  - 通过 `pip` 安装最新 ESPHome 并执行 `esphome compile config.yaml`；
-  - 将 `.esphome/build` 和 `config.yaml` 打包成 `firmware-<request_id>` Artifact（保留 14 天）；
-  - 运行名称包含 `request_id`，前端依赖该字段关联请求与 Workflow Run，请保持不变。
+  - 解码 YAML 到 `config.yaml`；
+  - 安装最新 ESPHome，执行 `esphome compile config.yaml`；
+  - 上传 `.esphome/build` 与 `config.yaml` 为 `firmware-<request_id>` Artifact（保留 14 天）；
+  - 运行名称包含 `request_id`，Pages Functions 根据该字段匹配 Workflow Run。
 
-* 注意事项
-  - OAuth 授权的 access token 会以签名后的 HttpOnly Cookie 存放，不会暴露给前端脚本，但仍建议使用 HTTPS 部署并定期轮换 `SESSION_SECRET`；
-  - `ALLOWED_ORIGINS` 必须与前端页面的实际域名一致，否则浏览器不会携带 Cookie；
-  - 如需支持多仓库，可在 Worker 中按需扩展路由和权限校验（当前版本固定使用环境变量指定的仓库）；
-  - GitHub OAuth token 默认长期有效，若需手动失效可以在用户的 GitHub 设置 → Applications 页面撤销授权。
+* 安全注意
+  - OAuth Access Token 通过签名后的 HttpOnly Cookie 保存，仅 Pages Functions 可访问；
+  - 切勿将真实密钥写入仓库，线上变量通过 Cloudflare 控制台配置，开发时使用 `.dev.vars`（已在 `.gitignore`）；
+  - 如需回收授权，可在 GitHub → Settings → Applications 中撤销对应 OAuth App。
 
 * 可选增强
-  - 接入 Monaco / CodeMirror 实现 YAML 高亮与校验；
-  - 增加常见板子的 YAML 模板、示例库；
-  - 支持更多运行历史记录 / 产物列表；
-  - 针对长时间的编译队列增加进度提示或通知渠道。
+  - 集成 Monaco / CodeMirror 提供 YAML 高亮、校验；
+  - 增加常用板型模板与示例库；
+  - 展示历史运行记录、多产物选择；
+  - 长耗时编译的通知或进度提示。

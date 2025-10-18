@@ -4,6 +4,16 @@ const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
 const STATE_MAX_AGE = 600; // 10 minutes
 const REQUIRED_SCOPES = ['repo', 'workflow'];
 
+type PagesContext<Env> = {
+  request: Request;
+  env: Env;
+  params: Record<string, string | undefined>;
+  next: () => Promise<Response>;
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
+type PagesFunction<Env = unknown> = (context: PagesContext<Env>) => Promise<Response>;
+
 interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
@@ -34,83 +44,79 @@ type WorkflowArtifact = {
   expired: boolean;
 };
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (request.method === 'OPTIONS') {
-      return buildCorsResponse(request, env, new Response(null, { status: 204 }));
+export const onRequest: PagesFunction<Env> = async (context) => {
+  const { request, env } = context;
+
+  if (request.method === 'OPTIONS') {
+    return buildCorsResponse(request, env, new Response(null, { status: 204 }));
+  }
+
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+
+  try {
+    if (request.method === 'GET' && path === '/auth/login') {
+      return buildCorsResponse(request, env, await handleLogin(env));
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+$/, '') || '/';
+    if (request.method === 'GET' && path === '/auth/callback') {
+      return buildCorsResponse(request, env, await handleCallback(request, env));
+    }
 
-    try {
-      if (request.method === 'GET' && path === '/auth/login') {
-        return buildCorsResponse(request, env, await handleLogin(request, env));
-      }
+    if ((request.method === 'POST' || request.method === 'GET') && path === '/auth/logout') {
+      return buildCorsResponse(request, env, await handleLogout(env));
+    }
 
-      if (request.method === 'GET' && path === '/auth/callback') {
-        return buildCorsResponse(request, env, await handleCallback(request, env));
-      }
+    if (request.method === 'GET' && path === '/api/session') {
+      return buildCorsResponse(request, env, await handleSession(request, env));
+    }
 
-      if ((request.method === 'POST' || request.method === 'GET') && path === '/auth/logout') {
-        return buildCorsResponse(request, env, await handleLogout(request, env));
-      }
+    if (request.method === 'POST' && path === '/api/compile') {
+      return buildCorsResponse(request, env, await handleCompile(request, env));
+    }
 
-      if (request.method === 'GET' && path === '/api/session') {
-        return buildCorsResponse(request, env, await handleSession(request, env));
-      }
+    if (request.method === 'GET' && path.startsWith('/api/status/')) {
+      const id = decodeURIComponent(path.replace('/api/status/', ''));
+      return buildCorsResponse(request, env, await handleStatus(request, env, id));
+    }
 
-      if (request.method === 'POST' && path === '/api/compile') {
-        return buildCorsResponse(request, env, await handleCompile(request, env));
-      }
-
-      if (request.method === 'GET' && path.startsWith('/api/status/')) {
-        const id = decodeURIComponent(path.replace('/api/status/', ''));
-        return buildCorsResponse(request, env, await handleStatus(request, env, id));
-      }
-
-      if (request.method === 'GET' && path.startsWith('/api/artifacts/')) {
-        const segments = path.split('/').filter(Boolean);
-        if (segments.length !== 4) {
-          return buildCorsResponse(
-            request,
-            env,
-            jsonResponse({ message: 'Invalid artifact request' }, 400)
-          );
-        }
-        const [, , runId, artifactId] = segments;
+    if (request.method === 'GET' && path.startsWith('/api/artifacts/')) {
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length !== 4) {
         return buildCorsResponse(
           request,
           env,
-          await handleArtifact(request, env, Number(runId), Number(artifactId))
+          jsonResponse({ message: 'Invalid artifact request' }, 400)
         );
       }
-
-      if (request.method === 'GET' && path === '/') {
-        return buildCorsResponse(
-          request,
-          env,
-          jsonResponse({ service: 'esphome-online-compiler-worker', ok: true })
-        );
-      }
-
+      const [, , runId, artifactId] = segments;
       return buildCorsResponse(
         request,
         env,
-        jsonResponse({ message: 'Not Found' }, 404)
-      );
-    } catch (error) {
-      console.error('Worker unhandled error', error);
-      return buildCorsResponse(
-        request,
-        env,
-        jsonResponse({ message: 'Internal Server Error' }, 500)
+        await handleArtifact(request, env, Number(runId), Number(artifactId))
       );
     }
+
+    if (request.method === 'GET' && path === '/') {
+      return buildCorsResponse(
+        request,
+        env,
+        jsonResponse({ service: 'esphome-online-compiler-pages', ok: true })
+      );
+    }
+
+    return context.next();
+  } catch (error) {
+    console.error('Pages function unhandled error', error);
+    return buildCorsResponse(
+      request,
+      env,
+      jsonResponse({ message: 'Internal Server Error' }, 500)
+    );
   }
 };
 
-async function handleLogin(_request: Request, env: Env): Promise<Response> {
+async function handleLogin(env: Env): Promise<Response> {
   const state = crypto.randomUUID();
   const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
   authorizeUrl.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
@@ -168,8 +174,6 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
 
   const tokenJson = (await tokenResponse.json()) as {
     access_token?: string;
-    scope?: string;
-    token_type?: string;
   };
 
   const accessToken = tokenJson.access_token;
@@ -203,7 +207,7 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 302, headers });
 }
 
-async function handleLogout(_request: Request, env: Env): Promise<Response> {
+async function handleLogout(env: Env): Promise<Response> {
   const headers = new Headers();
   headers.append(
     'Set-Cookie',
@@ -286,7 +290,7 @@ async function handleCompile(request: Request, env: Env): Promise<Response> {
 
   try {
     body = (await request.json()) as typeof body;
-  } catch (error) {
+  } catch {
     return jsonResponse({ message: '请求体必须是 JSON' }, 400);
   }
 
