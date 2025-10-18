@@ -20,6 +20,41 @@
           />
         </label>
 
+        <section v-if="hasSecrets" class="secrets-panel">
+          <h3>Secret 替换</h3>
+          <p class="field-hint">
+            检测到 YAML 中包含 <code>!secret</code> 占位符，请在下方填写对应的真实值，这些值仅在本地使用，不会持久保存。
+          </p>
+          <section v-for="name in secretNames" :key="name" class="secret-item">
+            <label class="field">
+              <span>{{ name }}</span>
+              <div class="password-input">
+                <input
+                  :type="revealedSecrets[name] ? 'text' : 'password'"
+                  v-model="secretValues[name]"
+                  placeholder="请输入 {{ name }} 的值"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  :disabled="pending"
+                />
+                <button
+                  type="button"
+                  class="ghost mini"
+                  :disabled="pending"
+                  @click="toggleSecretVisibility(name)"
+                >
+                  {{ revealedSecrets[name] ? '隐藏' : '显示' }}
+                </button>
+              </div>
+            </label>
+          </section>
+          <p v-if="missingSecretNames.length > 0" class="status warning">
+            仍有 {{ missingSecretNames.length }} 个 secret 未填写：{{ missingSecretNames.join(', ') }}
+          </p>
+        </section>
+
         <label class="field">
           <span>压缩包密码</span>
           <div class="password-input">
@@ -207,6 +242,9 @@ const preferPersonalToken = ref(false);
 const lastTokenSource = ref<TokenSource | null>(null);
 const serviceTokenDegraded = ref(false);
 const authLoading = ref(false);
+const secretNames = ref<string[]>([]);
+const secretValues = reactive<Record<string, string>>({});
+const revealedSecrets = reactive<Record<string, boolean>>({});
 
 const status = reactive<WorkflowStatus>({
   status: '',
@@ -225,6 +263,7 @@ const canUsePersonalToken = computed(
 const shouldEncouragePersonal = computed(
   () => !serviceTokenAvailable.value || serviceTokenDegraded.value
 );
+const hasSecrets = computed(() => secretNames.value.length > 0);
 const canSubmit = computed(() => {
   if (preferPersonalToken.value) {
     return canUsePersonalToken.value;
@@ -234,6 +273,9 @@ const canSubmit = computed(() => {
   }
   return canUsePersonalToken.value;
 });
+const missingSecretNames = computed(() =>
+  secretNames.value.filter((name) => !(secretValues[name]?.trim()))
+);
 const submitHint = computed(() => {
   if (canSubmit.value || serviceTokenDegraded.value) {
     return null;
@@ -354,8 +396,112 @@ function openRunUrl() {
   }
 }
 
+function toggleSecretVisibility(name: string) {
+  if (!(name in revealedSecrets)) {
+    revealedSecrets[name] = false;
+  }
+  revealedSecrets[name] = !revealedSecrets[name];
+}
+
+function collectSecretNames(source: string): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const matcher = source.matchAll(/!secret\s+(?:"([^"]+)"|'([^']+)'|([^\s#]+))/g);
+  for (const match of matcher) {
+    const key = match[1] ?? match[2] ?? match[3] ?? '';
+    const normalized = key.trim();
+    if (!normalized) {
+      continue;
+    }
+    const index = match.index ?? 0;
+    const lineStart = source.lastIndexOf('\n', index);
+    const prefix = source.slice((lineStart >= 0 ? lineStart + 1 : 0), index);
+    if (prefix.trimStart().startsWith('#')) {
+      continue;
+    }
+    if (seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    ordered.push(normalized);
+  }
+  return ordered;
+}
+
+function updateSecretPlaceholders(source: string) {
+  const found = collectSecretNames(source);
+  const nextSet = new Set(found);
+  secretNames.value = found;
+
+  Object.keys(secretValues).forEach((key) => {
+    if (!nextSet.has(key)) {
+      delete secretValues[key];
+    }
+  });
+
+  Object.keys(revealedSecrets).forEach((key) => {
+    if (!nextSet.has(key)) {
+      delete revealedSecrets[key];
+    }
+  });
+
+  found.forEach((name) => {
+    if (!(name in secretValues)) {
+      secretValues[name] = '';
+    }
+    if (!(name in revealedSecrets)) {
+      revealedSecrets[name] = false;
+    }
+  });
+}
+
+function formatSecretValue(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
+function applySecretValues(source: string): string {
+  if (!hasSecrets.value) {
+    return source;
+  }
+  return source.replace(
+    /!secret\s+(?:"([^"]+)"|'([^']+)'|([^\s#]+))/g,
+    (match, g1, g2, g3, offset: number, input: string) => {
+      const key = (g1 ?? g2 ?? g3 ?? '').trim();
+      if (!key) {
+        return match;
+      }
+      const lineStart = input.lastIndexOf('\n', offset);
+      const prefix = input.slice((lineStart >= 0 ? lineStart + 1 : 0), offset);
+      if (prefix.trimStart().startsWith('#')) {
+        return match;
+      }
+      const replacement = secretValues[key];
+      if (typeof replacement !== 'string') {
+        return match;
+      }
+      const normalized = replacement.trim();
+      if (!normalized) {
+        return match;
+      }
+      return formatSecretValue(normalized);
+    }
+  );
+}
+
+function clearSecrets() {
+  secretNames.value = [];
+  Object.keys(secretValues).forEach((key) => {
+    delete secretValues[key];
+  });
+  Object.keys(revealedSecrets).forEach((key) => {
+    delete revealedSecrets[key];
+  });
+}
+
 onMounted(() => {
   restoreDraft();
+  updateSecretPlaceholders(yaml.value);
   restorePassword();
   loadSession();
 });
@@ -373,6 +519,7 @@ watch(yaml, (value) => {
   } catch (err) {
     console.warn('保存 YAML 草稿失败', err);
   }
+  updateSecretPlaceholders(value);
 });
 
 watch(artifactPassword, (value) => {
@@ -440,11 +587,6 @@ async function handleSubmit() {
     return;
   }
 
-  if (yaml.value.length > 200_000) {
-    error.value = 'YAML 太大，请控制在 200KB 内';
-    return;
-  }
-
   const wantsPersonalToken =
     preferPersonalToken.value || !serviceTokenAvailable.value || serviceTokenDegraded.value;
   if (wantsPersonalToken) {
@@ -458,6 +600,21 @@ async function handleSubmit() {
     }
   } else if (!serviceTokenAvailable.value && !isAuthenticated.value) {
     error.value = '请先登录 GitHub 后再提交编译';
+    return;
+  }
+
+  if (secretNames.value.length > 0) {
+    const missing = secretNames.value.filter((name) => !(secretValues[name]?.trim()));
+    if (missing.length > 0) {
+      error.value = `请为以下 secret 提供具体值：${missing.join(', ')}`;
+      return;
+    }
+  }
+
+  const yamlForCompile = applySecretValues(yaml.value);
+
+  if (yamlForCompile.length > 200_000) {
+    error.value = 'YAML 太大，请控制在 200KB 内';
     return;
   }
 
@@ -487,7 +644,7 @@ async function handleSubmit() {
       artifactPassword: string;
       useUserToken?: boolean;
     } = {
-      encodedYaml: Base64.encode(yaml.value),
+      encodedYaml: Base64.encode(yamlForCompile),
       artifactPassword: normalizedPassword
     };
 
@@ -796,6 +953,7 @@ function clearJobState() {
 function reset() {
   clearJobState();
   yaml.value = '';
+  clearSecrets();
 }
 
 onBeforeUnmount(() => {
@@ -1072,6 +1230,35 @@ button.loading::after {
 
 .status-card p:last-of-type {
   margin-bottom: 0;
+}
+
+.secrets-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem 1.2rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.secrets-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #e2e8f0;
+}
+
+.secrets-panel code {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
+  font-size: 0.85rem;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 0.05rem 0.4rem;
+}
+
+.secret-item + .secret-item {
+  margin-top: 0.25rem;
 }
 
 .link-button {
