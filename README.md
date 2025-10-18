@@ -65,6 +65,8 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：用户完成 GitHub
 4. 前端轮询 Workflow 状态，完成后显示固件下载按钮。
 5. 需要切换账号时可点击 “退出登录” 清除会话。
 
+> 页面刷新不会丢失 YAML 草稿与正在进行的编译，请求会自动恢复并继续轮询状态。
+
 ## GitHub Actions Workflow
 
 - 解码 YAML 到 `config.yaml`。

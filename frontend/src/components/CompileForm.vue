@@ -99,7 +99,7 @@
 <script setup lang="ts">
 import axios from 'axios';
 import { Base64 } from 'js-base64';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
 type SessionPayload = {
   authenticated: boolean;
@@ -129,6 +129,18 @@ type ArtifactMeta = {
   id: number;
   name: string;
 };
+
+type PersistedJobState = {
+  requestId: string;
+  runId: number | null;
+  runUrl: string | null;
+  status: WorkflowStatus;
+  artifact: ArtifactMeta | null;
+  artifactUrl: string | null;
+};
+
+const STORAGE_DRAFT_KEY = 'esphome-online-compiler:yaml-draft';
+const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
 
 const client = axios.create({
   withCredentials: true
@@ -180,7 +192,23 @@ const statusClass = computed(() => {
 const statusMessage = computed(() => status.message || '');
 
 onMounted(() => {
+  restoreDraft();
   loadSession();
+});
+
+watch(yaml, (value) => {
+  try {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (value) {
+      window.localStorage.setItem(STORAGE_DRAFT_KEY, value);
+    } else {
+      window.localStorage.removeItem(STORAGE_DRAFT_KEY);
+    }
+  } catch (err) {
+    console.warn('保存 YAML 草稿失败', err);
+  }
 });
 
 async function loadSession() {
@@ -193,6 +221,11 @@ async function loadSession() {
     session.value = { authenticated: false };
   } finally {
     sessionLoaded.value = true;
+    if (session.value?.authenticated) {
+      restoreJobState();
+    } else {
+      clearJobState();
+    }
   }
 }
 
@@ -201,6 +234,7 @@ function login() {
 }
 
 function logout() {
+  clearJobState();
   window.location.href = '/auth/logout';
 }
 
@@ -222,8 +256,6 @@ async function handleSubmit() {
 
   pending.value = true;
   error.value = null;
-  artifact.value = null;
-  artifactUrl.value = null;
 
   try {
     const payload = {
@@ -239,12 +271,15 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json' }
     });
 
+    artifact.value = null;
+    artifactUrl.value = null;
     requestId.value = data.requestId;
     runId.value = data.runId;
     runUrl.value = data.htmlUrl ?? null;
     status.status = 'queued';
     status.conclusion = '';
     status.message = data.message ?? 'Workflow 已触发，等待运行...';
+    persistJobState();
     startPolling();
   } catch (err) {
     console.error('触发编译失败', err);
@@ -300,6 +335,8 @@ async function refreshStatus() {
   if (data.status === 'completed') {
     clearPolling();
   }
+
+  persistJobState();
 }
 
 async function downloadArtifact() {
@@ -319,6 +356,7 @@ async function downloadArtifact() {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(blobUrl);
+    persistJobState();
   } catch (err) {
     console.error('下载产物失败', err);
     error.value =
@@ -330,6 +368,113 @@ async function downloadArtifact() {
   }
 }
 
+function restoreDraft() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const draft = window.localStorage.getItem(STORAGE_DRAFT_KEY);
+    if (draft) {
+      yaml.value = draft;
+    }
+  } catch (err) {
+    console.warn('恢复 YAML 草稿失败', err);
+  }
+}
+
+function restoreJobState() {
+  if (requestId.value) {
+    return;
+  }
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (!session.value?.authenticated) {
+    clearPersistedJob();
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_JOB_KEY);
+    if (!raw) {
+      return;
+    }
+    const saved = JSON.parse(raw) as Partial<PersistedJobState> | null;
+    if (!saved || !saved.requestId) {
+      return;
+    }
+
+    requestId.value = saved.requestId;
+    runId.value = saved.runId ?? null;
+    runUrl.value = saved.runUrl ?? null;
+    status.status = saved.status?.status ?? '';
+    status.conclusion = saved.status?.conclusion ?? '';
+    status.message = saved.status?.message ?? '';
+    artifact.value = saved.artifact ?? null;
+
+    if (saved.artifactUrl) {
+      artifactUrl.value = saved.artifactUrl;
+    } else if (saved.runId != null && saved.artifact) {
+      artifactUrl.value = `/api/artifacts/${saved.runId}/${saved.artifact.id}`;
+    } else {
+      artifactUrl.value = null;
+    }
+
+    pending.value = false;
+    downloadingArtifact.value = false;
+    error.value = null;
+
+    if (status.status && status.status !== 'completed') {
+      startPolling();
+    }
+
+    persistJobState();
+  } catch (err) {
+    console.warn('恢复任务状态失败', err);
+    clearPersistedJob();
+  }
+}
+
+function persistJobState() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (!requestId.value) {
+    clearPersistedJob();
+    return;
+  }
+
+  const payload: PersistedJobState = {
+    requestId: requestId.value,
+    runId: runId.value,
+    runUrl: runUrl.value,
+    status: {
+      status: status.status,
+      conclusion: status.conclusion,
+      message: status.message
+    },
+    artifact: artifact.value ? { ...artifact.value } : null,
+    artifactUrl: artifactUrl.value
+  };
+
+  try {
+    window.localStorage.setItem(STORAGE_JOB_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('保存任务状态失败', err);
+  }
+}
+
+function clearPersistedJob() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(STORAGE_JOB_KEY);
+  } catch (err) {
+    console.warn('清理任务缓存失败', err);
+  }
+}
+
 function clearPolling() {
   if (pollTimer.value) {
     window.clearInterval(pollTimer.value);
@@ -337,10 +482,10 @@ function clearPolling() {
   }
 }
 
-function reset() {
-  yaml.value = '';
-  runId.value = null;
+function clearJobState() {
+  clearPolling();
   requestId.value = null;
+  runId.value = null;
   runUrl.value = null;
   artifactUrl.value = null;
   artifact.value = null;
@@ -349,7 +494,13 @@ function reset() {
   status.message = '';
   error.value = null;
   downloadingArtifact.value = false;
-  clearPolling();
+  pending.value = false;
+  clearPersistedJob();
+}
+
+function reset() {
+  clearJobState();
+  yaml.value = '';
 }
 
 onBeforeUnmount(() => {
