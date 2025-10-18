@@ -55,7 +55,7 @@
               {{ pending ? '正在提交...' : '提交编译' }}
             </button>
             <button
-              :disabled="pending || (!runId && !requestId)"
+              :disabled="!canReset"
               class="ghost"
               type="button"
               @click="reset"
@@ -247,6 +247,16 @@ const submitHint = computed(() => {
   return null;
 });
 const tokenInfo = computed(() => null);
+
+const canReset = computed(() => {
+  if (pending.value) {
+    return false;
+  }
+  if (runId.value || requestId.value) {
+    return true;
+  }
+  return yaml.value.trim().length > 0;
+});
 
 const displayStatus = computed(() => {
   if (!status.status) return '尚未开始';
@@ -778,7 +788,6 @@ function clearJobState() {
 function reset() {
   clearJobState();
   yaml.value = '';
-  regenerateArtifactPassword();
 }
 
 onBeforeUnmount(() => {
