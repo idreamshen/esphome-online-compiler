@@ -1,6 +1,13 @@
 # ESPHome 在线编译平台
+在浏览器中粘贴 ESPHome YAML 即可完成云端编译并下载固件
 
-Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：平台默认使用维护者提供的 GitHub Token 触发 Workflow，用户也可以通过 OAuth 授权切换到个人 Token，在浏览器中粘贴 ESPHome YAML 即可完成编译并下载固件，无需手动填写 Personal Access Token。
+## 功能亮点
+
+- ✅ 自动识别并按出现顺序收集 `!secret`，支持填写后缓存本地，下次继续编译无需重复输入。
+- ✅ 生成 16 位字母数字压缩包密码，可自定义并在本地持久化；上传的固件 Artifact 为加密压缩包，命名格式 `firmware-<request_id>-password.zip`。
+- ✅ YAML 草稿、压缩包密码、ESPHome 版本选择及最近编译状态都会自动保存，刷新页面即可恢复。
+- ✅ 支持在表单中选择常用 ESPHome 版本或手动输入具体版本号进行历史版本编译。
+- ✅ 失败时保留 GitHub Workflow 链接，一键跳转查看完整日志。
 
 ## 目录结构
 
@@ -62,17 +69,19 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：平台默认使用�
 
 1. （可选）点击 “GitHub 登录” 跳转授权页，授予 `workflow` + `public_repo`（或 `repo`）权限；未登录时平台会使用 `GITHUB_SERVICE_TOKEN` 触发 Workflow。
 2. 回到页面后粘贴 ESPHome YAML。
-3. 提交后，前端将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`（默认优先使用平台 Token，若失败会回退到已登录用户的 Token）。
-4. 前端轮询 Workflow 状态，完成后显示固件下载按钮。
-5. 需要切换账号时可点击 “退出登录” 清除会话。
+3. 如 YAML 中包含 `!secret`，系统会自动检测并生成输入框，支持自动补全 `"` 包裹的值与本地缓存；可在提交前确认字段。
+4. 若无自定义压缩包密码，界面会生成 16 位字母数字组合并展示，后续解压 Artifact 时需使用该密码。
+5. 提交后，前端将 YAML Base64 编码，通过 Pages Functions 触发 `workflow_dispatch`（默认优先使用平台 Token，若失败会回退到已登录用户的 Token）。
+6. 前端轮询 Workflow 状态，完成后显示固件下载按钮，直接下载加密包 `firmware-<request_id>-password.zip`。
+7. 需要切换账号时可点击 “退出登录” 清除会话。
 
 > 页面刷新不会丢失 YAML 草稿与正在进行的编译，请求会自动恢复并继续轮询状态。
 
 ## GitHub Actions Workflow
 
 - 解码 YAML 到 `config.yaml`。
-- 安装最新 ESPHome 并执行 `esphome compile config.yaml`。
-- 将所有生成的固件 `*.bin`（以及 manifest）与 `config.yaml` 打包到 `artifact/`，上传为 `firmware-<request_id>` Artifact（保留 14 天）。
+- 根据前端传入的版本号安装对应的 ESPHome（默认为最新稳定版）并执行 `esphome compile config.yaml`。
+- 将所有生成的固件 `*.bin`（以及 manifest）与 `config.yaml` 加密打包为 `firmware-<request_id>-password.zip`，上传到 `artifact/` 目录；Artifact 保留 1 天。
 - 运行名称包含 `request_id`，Pages Functions 据此匹配 Workflow Run。
 
 ## 安全注意事项
@@ -83,9 +92,3 @@ Vue 3 前端 + Cloudflare Pages Functions + GitHub Actions：平台默认使用�
 - 使用 `GITHUB_REQUIRE_PRIVATE_REPO=true` 时，授权范围会扩大到 `repo`，请确保仅在必要场景启用。
 - `GITHUB_SERVICE_TOKEN` 建议使用 Fine-grained PAT 并保存为 Pages Secret；GitHub 对单 Token 的 API 配额为每小时 5000 次，必要时可提示用户登录并切换为个人授权。
 
-## 可选增强
-
-- 集成 Monaco / CodeMirror 提供 YAML 高亮与校验。
-- 提供常见板型模板、示例库。
-- 展示更多运行历史记录、支持多产物选择。
-- 针对长耗时编译增加进度提示或通知渠道。
