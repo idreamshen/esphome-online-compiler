@@ -1,7 +1,7 @@
 <template>
   <section class="panel">
     <section v-if="!sessionLoaded" class="loading-card">
-      <p>正在加载会话...</p>
+      <p>正在加载...</p>
     </section>
 
     <template v-else>
