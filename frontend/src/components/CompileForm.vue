@@ -12,11 +12,10 @@
       <form class="form" @submit.prevent="handleSubmit">
         <label class="field">
           <span>ESPHome YAML</span>
-          <textarea
+          <YamlEditor
             v-model="yaml"
             :placeholder="YAML_PLACEHOLDER"
-            required
-            rows="18"
+            :schema-uri="ESPHOME_SCHEMA_URI"
           />
         </label>
 
@@ -198,6 +197,7 @@
 import axios from 'axios';
 import { Base64 } from 'js-base64';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import YamlEditor from './YamlEditor.vue';
 
 type TokenSource = 'service' | 'session';
 
@@ -257,6 +257,7 @@ const STORAGE_VERSION_KEY = 'esphome-online-compiler:esphome-version';
 const YAML_PLACEHOLDER = `esphome:
   name: mydevice
 ...`;
+const ESPHOME_SCHEMA_URI = 'https://schema.esphome.io/2025.9.1/esphome.json';
 
 const ESPHOME_VERSION_OPTIONS = [
   { value: '', label: '最新稳定版（自动）' },
@@ -1261,45 +1262,6 @@ onBeforeUnmount(() => {
     Monaco, Consolas, monospace;
   font-size: 0.85rem;
   letter-spacing: 0.04em;
-}
-
-textarea {
-  resize: vertical;
-  min-height: 320px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 12px;
-  padding: 0.75rem;
-  color: #f8fafc;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo,
-    Monaco, Consolas, monospace;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
-}
-
-textarea:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
-}
-
-textarea::-webkit-scrollbar {
-  width: 8px;
-}
-
-textarea::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-textarea::-webkit-scrollbar-thumb {
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.65), rgba(56, 189, 248, 0.65));
-}
-
-textarea::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.85), rgba(56, 189, 248, 0.85));
 }
 
 input:not([type='checkbox']) {

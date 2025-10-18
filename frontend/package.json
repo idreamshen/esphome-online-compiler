@@ -10,7 +10,9 @@
     "lint": "eslint . --ext .ts,.tsx,.vue"
   },
   "dependencies": {
+    "@codemirror/lang-yaml": "^6.1.2",
     "axios": "^1.6.7",
+    "codemirror": "^6.0.2",
     "js-base64": "^3.7.5",
     "vue": "^3.4.21"
   },
