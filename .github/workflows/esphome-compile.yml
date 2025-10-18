@@ -52,7 +52,8 @@ jobs:
             exit 1
           fi
 
-          echo "$ENCODED_YAML" | base64 --decode > config.yaml
+          echo "::add-mask::$ENCODED_YAML"
+          printf '%s' "$ENCODED_YAML" | base64 --decode > config.yaml
           echo "YAML length: $(wc -c < config.yaml)"
           echo "config-path=config.yaml" >> "$GITHUB_OUTPUT"
 
