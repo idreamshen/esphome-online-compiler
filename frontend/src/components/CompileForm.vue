@@ -14,7 +14,7 @@
           <span>ESPHome YAML</span>
           <textarea
             v-model="yaml"
-            placeholder="esphome:\n  name: mydevice\n..."
+            :placeholder="YAML_PLACEHOLDER"
             required
             rows="18"
           />
@@ -254,6 +254,9 @@ const STORAGE_JOB_KEY = 'esphome-online-compiler:job-state';
 const STORAGE_PASSWORD_KEY = 'esphome-online-compiler:artifact-password';
 const STORAGE_SECRETS_KEY = 'esphome-online-compiler:secret-values';
 const STORAGE_VERSION_KEY = 'esphome-online-compiler:esphome-version';
+const YAML_PLACEHOLDER = `esphome:
+  name: mydevice
+...`;
 
 const ESPHOME_VERSION_OPTIONS = [
   { value: '', label: '最新稳定版（自动）' },
