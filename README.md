@@ -59,8 +59,8 @@
 2. 在仓库根目录复制 `.dev.vars.example` 为 `.dev.vars`，填入 Dev OAuth App 的配置。
 3. 启动 Pages Functions 本地环境（需要安装 `wrangler`）：
    ```bash
-  # 在仓库根目录
-  wrangler pages dev frontend/dist --local --port 8787
+   # 在仓库根目录
+   wrangler pages dev frontend/dist --local --port 8787
    ```
    如果 `frontend/dist` 尚未存在，可先执行一次 `npm run build --prefix frontend`。
 4. 浏览器访问 `http://localhost:5173`；Vite 会通过代理把 `/auth/*`、`/api/*` 请求转发到 `http://127.0.0.1:8787`。
