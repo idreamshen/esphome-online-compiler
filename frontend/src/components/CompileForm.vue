@@ -30,7 +30,7 @@
                 <input
                   :type="revealedSecrets[name] ? 'text' : 'password'"
                   v-model="secretValues[name]"
-                  placeholder="请输入 {{ name }} 的值"
+                  placeholder="请输入值"
                   autocomplete="off"
                   autocorrect="off"
                   autocapitalize="none"
