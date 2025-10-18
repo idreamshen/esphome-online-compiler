@@ -113,7 +113,7 @@ jobs:
 
           artifact_dir="$PWD/artifact"
           mkdir -p "$artifact_dir"
-          zip_name="firmware-${REQUEST_ID}.zip"
+          zip_name="firmware-${REQUEST_ID}-password.zip"
 
           (
             cd "$bundle_dir"
