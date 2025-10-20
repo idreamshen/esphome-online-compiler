@@ -88,8 +88,17 @@ jobs:
         id: compile
         run: |
           set -eo pipefail
-          esphome version
-          esphome compile "${{ steps.decode.outputs.config-path }}"
+          log_path="${RUNNER_TEMP}/esphome-compile.log"
+          : > "$log_path"
+
+          esphome version | tee -a "$log_path"
+
+          set +e
+          esphome compile "${{ steps.decode.outputs.config-path }}" |& tee -a "$log_path"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          exit "$status"
 
       - name: Prepare firmware bundle
         run: |
@@ -146,7 +155,9 @@ jobs:
       - name: Publish summary
         if: always()
         run: |
-          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          summary_file="$GITHUB_STEP_SUMMARY"
+
+          cat <<'EOF' >> "$summary_file"
           ### ESPHome 编译结果
 
           - 请求 ID：${{ env.REQUEST_ID }}
@@ -157,3 +168,18 @@ jobs:
 
           下载产物：在 Workflow 的 Artifacts 面板获取 `firmware-${{ env.REQUEST_ID }}`。
           EOF
+
+          if [[ '${{ steps.compile.outcome }}' == 'failure' ]]; then
+            {
+              echo
+              echo "#### 编译错误日志（尾部）"
+              echo
+              if [[ -f "${RUNNER_TEMP}/esphome-compile.log" ]]; then
+                echo '```'
+                tail -n 30 "${RUNNER_TEMP}/esphome-compile.log"
+                echo '```'
+              else
+                echo "（未找到编译日志）"
+              fi
+            } >> "$summary_file"
+          fi
