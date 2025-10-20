@@ -79,7 +79,9 @@ const messages = {
         artifact: 'Firmware artifact:',
         downloading: 'Downloading...',
         downloadArtifact: 'Download {name}.zip',
-        workflowQueued: 'Workflow triggered. Waiting to run...'
+        workflowQueued: 'Workflow triggered. Waiting to run...',
+        errorLogs: 'Error Logs',
+        loadingLogs: 'Loading error logs...'
       },
       statusDisplay: {
         notStarted: 'Not started',
@@ -187,7 +189,9 @@ const messages = {
         artifact: '固件产物:',
         downloading: '下载中...',
         downloadArtifact: '下载 {name}.zip',
-        workflowQueued: 'Workflow 已触发，等待运行...'
+        workflowQueued: 'Workflow 已触发，等待运行...',
+        errorLogs: '错误日志',
+        loadingLogs: '正在加载错误日志...'
       },
       statusDisplay: {
         notStarted: '尚未开始',

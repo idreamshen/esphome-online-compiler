@@ -44,6 +44,14 @@ type WorkflowArtifact = {
   expired: boolean;
 };
 
+type WorkflowJob = {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+};
+
 type TokenSource = 'service' | 'session';
 
 type TokenCandidate = {
@@ -127,6 +135,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         env,
         await handleArtifact(request, env, Number(runId), Number(artifactId))
       );
+    }
+
+    if (request.method === 'GET' && path.startsWith('/api/jobs/')) {
+      const jobId = decodeURIComponent(path.replace('/api/jobs/', ''));
+      return buildCorsResponse(request, env, await handleJobLogs(request, env, jobId));
     }
 
     return context.next();
@@ -516,6 +529,22 @@ async function handleStatus(request: Request, env: Env, identifier: string): Pro
   const artifactsJson = JSON.parse(artifactsText) as { artifacts: WorkflowArtifact[] };
   const validArtifact = artifactsJson.artifacts.find((item) => !item.expired) ?? null;
 
+  let failedJobId: number | null = null;
+  if (run.status === 'completed' && run.conclusion !== 'success') {
+    const jobsResult = await githubRequestWithStrategy(
+      strategy,
+      `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/runs/${run.id}/jobs`,
+      { method: 'GET' }
+    );
+    if (jobsResult.response.ok) {
+      const jobsJson = (await jobsResult.response.json()) as { jobs: WorkflowJob[] };
+      const failedJob = jobsJson.jobs.find((job) => job.conclusion === 'failure');
+      if (failedJob) {
+        failedJobId = failedJob.id;
+      }
+    }
+  }
+
   return jsonResponse({
     runId: run.id,
     status: run.status,
@@ -528,7 +557,8 @@ async function handleStatus(request: Request, env: Env, identifier: string): Pro
           name: validArtifact.name
         }
       : null,
-    message: run.name ?? run.head_commit?.message ?? ''
+    message: run.name ?? run.head_commit?.message ?? '',
+    failedJobId
   });
 }
 
@@ -609,6 +639,92 @@ async function handleArtifact(
     status: artifactResp.status,
     headers
   });
+}
+
+async function handleJobLogs(request: Request, env: Env, jobId: string): Promise<Response> {
+  const preference = deriveTokenPreference(request);
+  const strategy = await resolveTokenStrategy(request, env, preference);
+  if (strategy.candidates.length === 0) {
+    return jsonResponse({ message: '缺少可用的 GitHub 凭据，请登录后重试' }, 401);
+  }
+
+  const jobIdNum = parseInt(jobId, 10);
+  if (isNaN(jobIdNum)) {
+    return jsonResponse({ message: 'Invalid job ID' }, 400);
+  }
+
+  const logsResult = await githubRequestWithStrategy(
+    strategy,
+    `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/jobs/${jobIdNum}/logs`,
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/vnd.github+json'
+      }
+    }
+  );
+
+  if (!logsResult.response.ok) {
+    const errorText = await logsResult.response.text();
+    console.error('Failed to fetch job logs', logsResult.response.status, errorText || logsResult.response.statusText);
+    const errorPayload = buildGithubErrorPayload(
+      logsResult.response.status,
+      logsResult.source,
+      logsResult.attempted,
+      strategy
+    );
+    return jsonResponse(errorPayload, logsResult.response.status);
+  }
+
+  const logs = await logsResult.response.text();
+  const errorLogs = extractErrorContext(logs);
+
+  return jsonResponse({
+    errorLogs: errorLogs.length > 0 ? errorLogs.join('\n') : null
+  });
+}
+
+function extractErrorContext(logs: string): string[] {
+  const lines = logs.split('\n');
+  const errorIndices: number[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    if (/error/i.test(lines[i])) {
+      errorIndices.push(i);
+    }
+  }
+
+  if (errorIndices.length === 0) {
+    return [];
+  }
+
+  const contextLines = new Set<number>();
+  const contextSize = 10;
+  
+  for (const errorIndex of errorIndices) {
+    const start = Math.max(0, errorIndex - contextSize);
+    const end = Math.min(lines.length - 1, errorIndex + contextSize);
+    
+    for (let i = start; i <= end; i++) {
+      contextLines.add(i);
+    }
+  }
+
+  const sortedIndices = Array.from(contextLines).sort((a, b) => a - b);
+  const result: string[] = [];
+  let lastIndex = -2;
+  
+  for (const index of sortedIndices) {
+    if (index > lastIndex + 1) {
+      if (result.length > 0) {
+        result.push('...');
+      }
+    }
+    result.push(lines[index]);
+    lastIndex = index;
+  }
+
+  return result;
 }
 
 async function findRunByRequestId(strategy: TokenStrategy, env: Env, requestId: string) {

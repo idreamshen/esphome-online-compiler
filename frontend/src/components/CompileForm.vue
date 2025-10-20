@@ -191,6 +191,14 @@
             {{ downloadingArtifact ? t('compileForm.status.downloading') : t('compileForm.status.downloadArtifact', { name: artifact.name }) }}
           </button>
         </p>
+        
+        <section v-if="jobLogs" class="error-logs">
+          <h3>{{ t('compileForm.status.errorLogs') }}</h3>
+          <pre class="log-content">{{ jobLogs }}</pre>
+        </section>
+        <section v-else-if="loadingLogs" class="error-logs">
+          <p class="loading-text">{{ t('compileForm.status.loadingLogs') }}</p>
+        </section>
       </section>
     </template>
   </section>
@@ -229,6 +237,7 @@ type WorkflowStatus = {
   status: string;
   conclusion: string;
   message: string;
+  failedJobId?: number | null;
 };
 
 type ArtifactMeta = {
@@ -300,6 +309,8 @@ const revealedSecrets = reactive<Record<string, boolean>>({});
 const customEsphomeVersion = ref('');
 const selectedEsphomeVersion = ref('');
 const esphomeVersionSelection = ref<string>(ESPHOME_VERSION_OPTIONS[0].value);
+const jobLogs = ref<string | null>(null);
+const loadingLogs = ref(false);
 const esphomeVersionLabel = computed(() => {
   if (!selectedEsphomeVersion.value) {
     return t('compileForm.fields.esphomeVersion.defaultLabel');
@@ -319,7 +330,8 @@ const esphomeVersionLabel = computed(() => {
 const status = reactive<WorkflowStatus>({
   status: '',
   conclusion: '',
-  message: ''
+  message: '',
+  failedJobId: null
 });
 
 const isAuthenticated = computed(() => Boolean(session.value?.authenticated));
@@ -803,7 +815,7 @@ async function loadSession() {
   } finally {
     sessionLoaded.value = true;
     if (isAuthenticated.value || serviceTokenAvailable.value) {
-      restoreJobState();
+      await restoreJobState();
     } else {
       clearJobState();
     }
@@ -1007,9 +1019,13 @@ async function refreshStatus() {
   status.status = data.status ?? '';
   status.conclusion = data.conclusion ?? '';
   status.message = data.message ?? '';
+  status.failedJobId = data.failedJobId ?? null;
 
   if (data.status === 'completed') {
     clearPolling();
+    if (data.conclusion !== 'success' && data.failedJobId) {
+      await fetchJobLogs(data.failedJobId);
+    }
   }
 
   persistJobState();
@@ -1051,6 +1067,35 @@ async function downloadArtifact() {
   }
 }
 
+async function fetchJobLogs(jobId: number) {
+  if (loadingLogs.value) return;
+  loadingLogs.value = true;
+  jobLogs.value = null;
+
+  try {
+    const tokenHeaders =
+      (preferPersonalToken.value || serviceTokenDegraded.value) && canUsePersonalToken.value
+        ? { 'X-GitHub-Token-Source': 'session' }
+        : undefined;
+    const { data } = await client.get<{ errorLogs: string | null }>(
+      `/api/jobs/${jobId}`,
+      {
+        headers: tokenHeaders
+      }
+    );
+    jobLogs.value = data.errorLogs;
+  } catch (err) {
+    console.error('Failed to fetch job logs', err);
+    const payload = axios.isAxiosError(err)
+      ? (err.response?.data as ApiErrorPayload | undefined)
+      : undefined;
+    applyServiceTokenDegraded(payload);
+    jobLogs.value = null;
+  } finally {
+    loadingLogs.value = false;
+  }
+}
+
 function restoreDraft() {
   if (typeof window === 'undefined') {
     return;
@@ -1065,7 +1110,7 @@ function restoreDraft() {
   }
 }
 
-function restoreJobState() {
+async function restoreJobState() {
   if (requestId.value) {
     return;
   }
@@ -1092,6 +1137,7 @@ function restoreJobState() {
     status.status = saved.status?.status ?? '';
     status.conclusion = saved.status?.conclusion ?? '';
     status.message = saved.status?.message ?? '';
+    status.failedJobId = saved.status?.failedJobId ?? null;
     artifact.value = saved.artifact ?? null;
     lastTokenSource.value = saved.tokenSource ?? null;
 
@@ -1133,6 +1179,8 @@ function restoreJobState() {
 
     if (status.status && status.status !== 'completed') {
       startPolling();
+    } else if (status.status === 'completed' && status.conclusion !== 'success' && saved.status?.failedJobId) {
+      await fetchJobLogs(saved.status.failedJobId);
     }
 
     persistJobState();
@@ -1203,10 +1251,12 @@ function clearJobState() {
   status.status = '';
   status.conclusion = '';
   status.message = '';
+  status.failedJobId = null;
   lastTokenSource.value = null;
   error.value = null;
   downloadingArtifact.value = false;
   pending.value = false;
+  jobLogs.value = null;
   clearPersistedJob();
 }
 
@@ -1584,5 +1634,59 @@ button.loading::after {
 .badge.error {
   background: rgba(248, 113, 113, 0.2);
   color: #fecaca;
+}
+
+.error-logs {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.error-logs h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: #fecaca;
+}
+
+.error-logs .loading-text {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.log-content {
+  margin: 0;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.log-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.log-content::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
 }
 </style>
