@@ -1207,7 +1207,8 @@ function persistJobState() {
     status: {
       status: status.status,
       conclusion: status.conclusion,
-      message: status.message
+      message: status.message,
+      failedJobId: status.failedJobId ?? null
     },
     artifact: artifact.value ? { ...artifact.value } : null,
     artifactUrl: artifactUrl.value,
