@@ -888,8 +888,21 @@ async function handleSubmit() {
     artifactPassword.value = normalizedPassword;
   }
 
-  pending.value = true;
+  // 清除旧的编译状态
+  clearPolling();
+  requestId.value = null;
+  runId.value = null;
+  runUrl.value = null;
+  artifactUrl.value = null;
+  artifact.value = null;
+  status.status = '';
+  status.conclusion = '';
+  status.message = '';
+  status.failedJobId = null;
+  jobLogs.value = null;
   error.value = null;
+
+  pending.value = true;
 
   try {
     const payload: {
@@ -928,14 +941,13 @@ async function handleSubmit() {
       headers
     });
 
-    artifact.value = null;
-    artifactUrl.value = null;
     requestId.value = data.requestId;
     runId.value = data.runId;
     runUrl.value = data.htmlUrl ?? null;
     status.status = 'queued';
     status.conclusion = '';
     status.message = data.message ?? t('compileForm.status.workflowQueued');
+    status.failedJobId = null;
     const resolvedSource =
       data.tokenSource ??
       (wantsPersonalToken && canUsePersonalToken.value
@@ -1643,6 +1655,9 @@ button.loading::after {
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(248, 113, 113, 0.3);
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .error-logs h3 {
@@ -1667,9 +1682,12 @@ button.loading::after {
   font-size: 0.8rem;
   line-height: 1.5;
   overflow-x: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-all;
   max-height: 400px;
   overflow-y: auto;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .log-content::-webkit-scrollbar {
