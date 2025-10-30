@@ -170,7 +170,7 @@
         </p>
         <p v-if="runUrl">
           <strong>{{ t('compileForm.status.runLinkLabel') }}</strong>
-          <button class="link-button" type="button" @click="openRunUrl">{{ t('compileForm.status.openRun') }}</button>
+          <button class="link-button" type="button" @click.prevent="openRunUrl">{{ t('compileForm.status.openRun') }}</button>
         </p>
         <p>
           <strong>{{ t('compileForm.status.esphomeVersion') }}</strong>
@@ -526,10 +526,7 @@ function regenerateArtifactPassword() {
 
 function openRunUrl() {
   if (!runUrl.value) return;
-  const opened = window.open(runUrl.value, '_blank', 'noopener');
-  if (!opened) {
-    window.location.href = runUrl.value;
-  }
+  window.open(runUrl.value, '_blank', 'noopener,noreferrer');
 }
 
 function toggleSecretVisibility(name: string) {
