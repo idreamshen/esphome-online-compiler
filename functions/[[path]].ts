@@ -716,45 +716,35 @@ async function handleJobLogs(request: Request, env: Env, jobId: string): Promise
 
 function extractErrorContext(logs: string): string[] {
   const lines = logs.split('\n');
-  const errorIndices: number[] = [];
-  
-  for (let i = 0; i < lines.length; i++) {
-    if (/error/i.test(lines[i])) {
-      errorIndices.push(i);
+
+  // 找到最后一个 ##[error] 标志
+  let lastErrorIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes('##[error]')) {
+      lastErrorIndex = i;
+      break;
     }
   }
 
-  if (errorIndices.length === 0) {
+  // 如果没有找到 ##[error] 标志，返回空
+  if (lastErrorIndex === -1) {
     return [];
   }
 
-  const contextLines = new Set<number>();
-  const contextSize = 10;
-  
-  for (const errorIndex of errorIndices) {
-    const start = Math.max(0, errorIndex - contextSize);
-    const end = Math.min(lines.length - 1, errorIndex + contextSize);
-    
-    for (let i = start; i <= end; i++) {
-      contextLines.add(i);
+  // 向上查找最近的 ##[endgroup] 标志
+  let endgroupIndex = -1;
+  for (let i = lastErrorIndex - 1; i >= 0; i--) {
+    if (lines[i].includes('##[endgroup]')) {
+      endgroupIndex = i;
+      break;
     }
   }
 
-  const sortedIndices = Array.from(contextLines).sort((a, b) => a - b);
-  const result: string[] = [];
-  let lastIndex = -2;
-  
-  for (const index of sortedIndices) {
-    if (index > lastIndex + 1) {
-      if (result.length > 0) {
-        result.push('...');
-      }
-    }
-    result.push(lines[index]);
-    lastIndex = index;
-  }
+  // 如果没有找到 ##[endgroup]，使用文件开头
+  const startIndex = endgroupIndex === -1 ? 0 : endgroupIndex;
 
-  return result;
+  // 提取两个标志之间的内容（不包含 ##[endgroup] 和 ##[error] 本身）
+  return lines.slice(startIndex + 1, lastErrorIndex);
 }
 
 async function findRunByRequestId(strategy: TokenStrategy, env: Env, requestId: string) {
