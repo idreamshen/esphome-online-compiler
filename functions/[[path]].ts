@@ -658,25 +658,55 @@ async function handleJobLogs(request: Request, env: Env, jobId: string): Promise
     `https://api.github.com/repos/${env.GITHUB_REPO_OWNER}/${env.GITHUB_REPO_NAME}/actions/jobs/${jobIdNum}/logs`,
     {
       method: 'GET',
+      redirect: 'manual',
       headers: {
         Accept: 'application/vnd.github+json'
       }
     }
   );
 
-  if (!logsResult.response.ok) {
-    const errorText = await logsResult.response.text();
-    console.error('Failed to fetch job logs', logsResult.response.status, errorText || logsResult.response.statusText);
-    const errorPayload = buildGithubErrorPayload(
-      logsResult.response.status,
-      logsResult.source,
-      logsResult.attempted,
-      strategy
-    );
-    return jsonResponse(errorPayload, logsResult.response.status);
+  let logsResponse = logsResult.response;
+
+  // GitHub 会返回重定向到 Azure Blob Storage，需要手动跟随重定向
+  if (logsResponse.status >= 300 && logsResponse.status < 400) {
+    const location = logsResponse.headers.get('Location');
+    if (!location) {
+      console.error('Job logs redirect missing location');
+      return jsonResponse({ message: '获取日志失败' }, 502);
+    }
+
+    const followResp = await fetch(location, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'esphome-online-compiler/1.0'
+      }
+    });
+
+    if (!followResp.ok) {
+      console.error('Failed to follow job logs redirect', followResp.status, await followResp.text());
+      return jsonResponse({ message: '获取日志失败' }, followResp.status);
+    }
+
+    logsResponse = followResp;
   }
 
-  const logs = await logsResult.response.text();
+  if (!logsResponse.ok) {
+    const errorText = await logsResponse.text();
+    console.error('Failed to fetch job logs', logsResponse.status, errorText || logsResponse.statusText);
+    const isGitHubResponse = logsResponse === logsResult.response;
+    if (isGitHubResponse) {
+      const errorPayload = buildGithubErrorPayload(
+        logsResponse.status,
+        logsResult.source,
+        logsResult.attempted,
+        strategy
+      );
+      return jsonResponse(errorPayload, logsResponse.status);
+    }
+    return jsonResponse({ message: '获取日志失败' }, logsResponse.status);
+  }
+
+  const logs = await logsResponse.text();
   const errorLogs = extractErrorContext(logs);
 
   return jsonResponse({
