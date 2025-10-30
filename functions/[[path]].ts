@@ -984,10 +984,32 @@ async function githubRequest(token: string, url: string, init: RequestInit): Pro
     headers.set('User-Agent', 'esphome-online-compiler/1.0');
   }
 
-  return fetch(url, {
+  // 打印请求日志用于排查问题
+  const maskedToken = token.length > 8
+    ? `${token.substring(0, 4)}...${token.substring(token.length - 4)}`
+    : '***';
+  console.log('[GitHub Request]', {
+    method: init.method || 'GET',
+    url: url,
+    token: maskedToken,
+    timestamp: new Date().toISOString()
+  });
+
+  const response = await fetch(url, {
     ...init,
     headers
   });
+
+  // 打印响应日志
+  console.log('[GitHub Response]', {
+    method: init.method || 'GET',
+    url: url,
+    status: response.status,
+    statusText: response.statusText,
+    timestamp: new Date().toISOString()
+  });
+
+  return response;
 }
 
 async function createSessionValue(token: string, secret: string): Promise<string> {
