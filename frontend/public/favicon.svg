@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="32" fill="#0f172a"/>
+  <!-- Chip body -->
+  <rect x="18" y="18" width="28" height="28" rx="4" fill="#38bdf8"/>
+  <!-- Chip inner -->
+  <rect x="23" y="23" width="18" height="18" rx="2" fill="#0f172a"/>
+  <!-- Pins left -->
+  <rect x="11" y="24" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <rect x="11" y="30.5" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <rect x="11" y="37" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <!-- Pins right -->
+  <rect x="46" y="24" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <rect x="46" y="30.5" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <rect x="46" y="37" width="7" height="3" rx="1" fill="#94a3b8"/>
+  <!-- Pins top -->
+  <rect x="24" y="11" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <rect x="30.5" y="11" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <rect x="37" y="11" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <!-- Pins bottom -->
+  <rect x="24" y="46" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <rect x="30.5" y="46" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <rect x="37" y="46" width="3" height="7" rx="1" fill="#94a3b8"/>
+  <!-- Lightning bolt (compile) -->
+  <path d="M34 24 L28 33 H33 L30 40 L36 31 H31 Z" fill="#38bdf8"/>
+</svg>
