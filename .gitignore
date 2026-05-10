@@ -9,3 +9,4 @@ backend/dist/
 .dev.vars
 .dev.vars.*
 .wrangler/
+/.agent-shell/
